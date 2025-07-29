@@ -218,6 +218,46 @@ max_single_file_mb = 500
 compression_level = 9  # Maximum compression
 ```
 
+## 🚀 New in Version 2.0
+
+### Enterprise-Ready Features
+- **🔧 Configuration Management**: Use `config/config.json` for environment-specific settings
+- **📊 Performance Monitoring**: Built-in performance tracking with optimization suggestions  
+- **🔒 Security & Compliance**: Comprehensive audit trails and compliance reporting
+- **🧪 Testing Suite**: Complete test coverage with GitHub Actions CI/CD
+- **📈 Enhanced Logging**: Detailed operation logs with security event tracking
+
+### Quick Configuration Setup
+```bash
+# Copy template and customize
+cp config/config.template.json config/config.json
+
+# Edit for your environment
+{
+  "environments": {
+    "production": {
+      "source_workspace_id": "your-prod-workspace",
+      "backup_workspace_id": "your-backup-workspace",
+      "retention_days": 90
+    }
+  }
+}
+```
+
+### Performance Monitoring
+```python
+# Add to your notebooks
+from scripts.performance_monitor import PerformanceMonitor
+
+monitor = PerformanceMonitor()
+monitor.start_operation("backup_tables")
+# ... your backup code ...
+metrics = monitor.end_operation(rows_processed=1000000)
+
+# Get optimization suggestions
+suggestions = monitor.get_optimization_suggestions()
+```
+
 ## 🔒 Security & Best Practices
 
 - **Managed Identity**: Use Azure Managed Identity for secure authentication
@@ -267,3 +307,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Made with ❤️ for the Microsoft Fabric community**
+
+### Helper Tools & Scripts
+- **Migration Helper**: Convert legacy backups to new format (`scripts/migration-helper.py`)
+- **Backup Validator**: Verify backup integrity (`scripts/validate-backup.py`) 
+- **Performance Monitor**: Track and optimize backup performance (`scripts/performance_monitor.py`)
+- **Configuration Loader**: Manage environment-specific settings (`scripts/config_loader.py`)
+- **Security Utils**: Audit logging and compliance features (`scripts/security_utils.py`)

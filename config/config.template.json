@@ -1,0 +1,80 @@
+{
+    "_comment": "Configuration file for advanced backup scenarios - Copy this file to config.json and customize for your environment",
+    "environments": {
+        "development": {
+            "source_workspace_id": "your-dev-workspace-id",
+            "backup_workspace_id": "your-backup-workspace-id",
+            "retention_days": 7,
+            "compression_level": 6,
+            "max_table_rows_in_zip": 50000
+        },
+        "staging": {
+            "source_workspace_id": "your-staging-workspace-id",
+            "backup_workspace_id": "your-backup-workspace-id",
+            "retention_days": 30,
+            "compression_level": 8,
+            "max_table_rows_in_zip": 100000
+        },
+        "production": {
+            "source_workspace_id": "your-prod-workspace-id",
+            "backup_workspace_id": "your-backup-workspace-id",
+            "retention_days": 90,
+            "compression_level": 9,
+            "max_table_rows_in_zip": 200000
+        }
+    },
+    "backup_schedules": {
+        "daily": {
+            "description": "Daily backup of critical tables",
+            "schedule": "0 2 * * *",
+            "backup_tables": true,
+            "backup_files": true,
+            "include_large_tables": false,
+            "notification_email": "admin@company.com"
+        },
+        "weekly": {
+            "description": "Full weekly backup",
+            "schedule": "0 0 * * 0",
+            "backup_tables": true,
+            "backup_files": true,
+            "include_large_tables": true,
+            "verify_backup": true
+        }
+    },
+    "storage_configurations": {
+        "default": {
+            "backup_type": "lakehouse",
+            "use_managed_identity": true
+        },
+        "external_storage": {
+            "backup_type": "storage_account",
+            "backup_storage_account": "your-storage-account",
+            "backup_container": "lakehouse-backups",
+            "use_managed_identity": true
+        },
+        "adls": {
+            "backup_type": "adls",
+            "backup_adls_account": "your-adls-account",
+            "backup_adls_container": "backups",
+            "use_managed_identity": true
+        }
+    },
+    "notification_settings": {
+        "email_enabled": false,
+        "teams_webhook": "",
+        "slack_webhook": "",
+        "success_notifications": true,
+        "failure_notifications": true
+    },
+    "advanced_options": {
+        "parallel_table_processing": true,
+        "max_parallel_tables": 5,
+        "enable_incremental_backup": false,
+        "delta_time_travel_retention_hours": 168,
+        "custom_file_filters": [
+            "*.tmp",
+            "*.log",
+            "_temp/*"
+        ]
+    }
+}

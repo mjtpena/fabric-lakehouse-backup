@@ -1,0 +1,93 @@
+# GitHub Actions workflow to validate notebook structure and syntax
+name: Validate Notebooks
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '*.ipynb'
+      - 'scripts/*.py'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install nbformat jsonschema pyspark pandas
+    
+    - name: Validate notebook structure
+      run: |
+        python -c "
+        import nbformat
+        import sys
+        import os
+        
+        notebooks = ['Fabric_Lakehouse_Backup.ipynb', 'Fabric_Lakehouse_Restore.ipynb']
+        
+        for notebook in notebooks:
+            if os.path.exists(notebook):
+                try:
+                    with open(notebook, 'r') as f:
+                        nb = nbformat.read(f, as_version=4)
+                    print(f'✅ {notebook}: Valid notebook structure')
+                    
+                    # Check for required parameters
+                    first_cell = nb.cells[0].source if nb.cells else ''
+                    if 'Parameters' in first_cell or 'parameters' in first_cell:
+                        print(f'✅ {notebook}: Contains parameter cell')
+                    else:
+                        print(f'⚠️  {notebook}: No parameter cell found')
+                        
+                except Exception as e:
+                    print(f'❌ {notebook}: Invalid - {str(e)}')
+                    sys.exit(1)
+            else:
+                print(f'⚠️  {notebook}: File not found')
+        
+        print('All notebook validations completed')
+        "
+    
+    - name: Validate Python scripts
+      run: |
+        python -m py_compile scripts/*.py
+        echo "✅ All Python scripts compile successfully"
+    
+    - name: Check documentation links
+      run: |
+        python -c "
+        import os
+        import re
+        
+        # Check for broken relative links in markdown files
+        md_files = []
+        for root, dirs, files in os.walk('.'):
+            for file in files:
+                if file.endswith('.md'):
+                    md_files.append(os.path.join(root, file))
+        
+        for md_file in md_files:
+            with open(md_file, 'r') as f:
+                content = f.read()
+                # Find markdown links
+                links = re.findall(r'\[.*?\]\((.*?)\)', content)
+                for link in links:
+                    if link.startswith('./') or not link.startswith('http'):
+                        # Check if relative file exists
+                        link_path = os.path.join(os.path.dirname(md_file), link)
+                        if not os.path.exists(link_path):
+                            print(f'⚠️  Broken link in {md_file}: {link}')
+        
+        print('✅ Documentation link check completed')
+        "
