@@ -1,0 +1,47 @@
+# =============================================================================
+# Fabric Lakehouse Backup - Settings Template
+# =============================================================================
+# Copy this file to 'settings.yml' in the parent directory and customize values
+# This file contains shared variables used across all pipelines
+# =============================================================================
+
+variables:
+  # ---------------------------------------------------------------------------
+  # Organization Settings
+  # ---------------------------------------------------------------------------
+  # Your organization name (used for naming conventions)
+  - name: organization_name
+    value: "your-org"
+
+  # ---------------------------------------------------------------------------
+  # Azure Subscription Settings
+  # ---------------------------------------------------------------------------
+  # Subscription type identifier for service connection naming
+  # This is used in the pattern: sp-{subscriptionType}-{environment}-01
+  - name: subscriptionType
+    value: "your-subscription-type"
+
+  # ---------------------------------------------------------------------------
+  # Agent Pool Settings (for self-hosted agents)
+  # ---------------------------------------------------------------------------
+  # Format pattern for self-hosted agent pool names
+  # Example: mdp-mgmt-{platformEnvironment}-aue-devops-01
+  # - name: agentPoolPattern
+  #   value: "your-agent-pool-{platformEnvironment}"
+
+  # ---------------------------------------------------------------------------
+  # Backup Retention Settings
+  # ---------------------------------------------------------------------------
+  # Number of days to retain backups (used for cleanup automation)
+  - name: backup_retention_days
+    value: "30"
+
+  # ---------------------------------------------------------------------------
+  # Naming Conventions
+  # ---------------------------------------------------------------------------
+  # These patterns are used to construct resource names automatically
+  # 
+  # Backup lakehouse naming: lh_{environment}_backup
+  # Backup workspace naming: ws-{environment}-bkp-maintenance
+  # 
+  # Modify the pipeline files if you need different naming conventions

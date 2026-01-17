@@ -1,316 +1,291 @@
-# Microsoft Fabric Lakehouse Backup & Restore Tools
+# Microsoft Fabric Lakehouse Backup & Restore
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![Microsoft Fabric](https://img.shields.io/badge/Microsoft-Fabric-blue)](https://www.microsoft.com/en-us/microsoft-fabric)
 
-A comprehensive solution for backing up and restoring Microsoft Fabric Lakehouse data, including both tables (Delta format) and files with perfect format preservation.
+A complete backup and restore solution for Microsoft Fabric Lakehouses, featuring automated Azure DevOps pipelines and PySpark notebooks for reliable data protection.
 
-## 🚀 Features
+## 🌟 Features
 
-### Complete Lakehouse Backup
-- **Unified ZIP Backup**: Creates a single ZIP file containing both tables and files
-- **Multiple Table Formats**: Tables stored as Delta/Parquet + CSV + Schema for maximum compatibility
-- **Perfect File Preservation**: All file formats (images, PDFs, documents) preserved exactly as originals
-- **Intelligent Compression**: Configurable compression with space-saving optimization
-- **Metadata Rich**: Complete backup metadata and restore instructions included
+- **Full Lakehouse Backup**: Backup both Delta tables and files from any Fabric Lakehouse
+- **Cross-Workspace Support**: Backup and restore across different Fabric workspaces
+- **Automated Scheduling**: Schedule daily backups via Azure DevOps pipelines
+- **Flexible Restore**: Restore complete backups or selective tables/files
+- **Service Principal Authentication**: Secure, automated execution without user interaction
+- **Detailed Logging**: Comprehensive logging and manifest generation for audit trails
+- **Ancient Date Handling**: Pre-configured for legacy data with pre-1582 dates (e.g., Oracle EBS)
 
-### Flexible Restore Options
-- **Smart Format Detection**: Automatically detects backup format and chooses optimal restore method
-- **Format Preference**: Choose between Parquet (optimal) or CSV (human-readable) for table restoration
-- **Selective Restore**: Restore specific tables or files using patterns
-- **Dry Run Mode**: Preview what would be restored without making changes
-- **Verification**: Built-in backup/restore verification
-
-### Storage Flexibility
-- **OneLake Integration**: Native support for Fabric Lakehouse storage
-- **Azure Storage Account**: Backup to external Azure Storage accounts
-- **ADLS Gen2**: Support for Azure Data Lake Storage Gen2
-- **Managed Identity**: Secure authentication using Azure Managed Identity
-
-## 📋 Prerequisites
-
-- Microsoft Fabric workspace with Lakehouse
-- PySpark environment (Fabric Notebook runtime)
-- Required permissions:
-  - Read access to source lakehouse
-  - Write access to backup location
-  - Write access to target lakehouse (for restore)
-
-## 🔧 Quick Start
-
-### 1. Backup Your Lakehouse
-
-Open the `Fabric_Lakehouse_Combined_Backup.ipynb` notebook and configure these parameters:
-
-```python
-# Source Configuration
-source_lakehouse_name = "your-source-lakehouse"
-source_workspace_id = "your-workspace-id"
-
-# Backup Configuration
-backup_type = "lakehouse"  # or "storage_account", "adls"
-backup_lakehouse_name = "your-backup-lakehouse"
-backup_workspace_id = "your-backup-workspace-id"
-
-# Options
-backup_tables = True
-backup_files = True
-backup_method = "unified_zip"
-```
-
-Run the notebook to create a complete backup with:
-- ✅ All tables in multiple formats (Delta/Parquet/CSV)
-- ✅ All files in original formats
-- ✅ Complete metadata and restore instructions
-- ✅ Compressed ZIP with space optimization
-
-### 2. Restore Your Data
-
-Open the `Fabric_Lakehouse_Restore.ipynb` notebook and configure:
-
-```python
-# Backup Source
-backup_source_type = "lakehouse"
-backup_lakehouse_name = "your-backup-lakehouse"
-backup_path = "complete_backup_2024-01-01_12-00-00_abcd1234"
-
-# Restore Target
-target_lakehouse_name = "your-target-lakehouse"
-target_workspace_id = "your-workspace-id"
-
-# Options
-restore_tables = True
-restore_files = True
-table_format_preference = "parquet"  # or "csv", "auto"
-```
-
-## 🏗️ Architecture
-
-### Backup Process
-```
-Source Lakehouse
-├── Tables/ (Delta format)
-│   ├── customers
-│   ├── products
-│   └── orders
-└── Files/
-    ├── images/
-    ├── documents/
-    └── data/
-
-        ↓ Backup Process ↓
-
-Unified ZIP Backup
-├── _backup_info/
-│   ├── metadata.json
-│   ├── contents.json
-│   └── RESTORE_INSTRUCTIONS.md
-├── tables/
-│   ├── customers/
-│   │   ├── customers.csv      # Human-readable
-│   │   ├── customers.parquet  # Optimized
-│   │   ├── schema.json        # Data types
-│   │   └── metadata.json      # Statistics
-│   └── ...
-└── files/
-    ├── images/photo.jpg       # Original format
-    ├── documents/report.pdf   # Original format
-    └── data/data.csv          # Original format
-```
-
-### Storage Options
-- **OneLake**: Store backups in another Fabric Lakehouse
-- **Azure Storage**: External Azure Storage Account with containers
-- **ADLS Gen2**: Azure Data Lake Storage Gen2 for enterprise scenarios
-
-## 📊 Configuration Options
-
-### Backup Configuration
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `backup_tables` | Include tables in backup | `True` |
-| `backup_files` | Include files in backup | `True` |
-| `backup_method` | Backup method | `"unified_zip"` |
-| `max_table_rows_in_zip` | Max rows per table in ZIP | `100000` |
-| `max_single_file_mb` | Max file size in ZIP (MB) | `100` |
-| `compression_level` | ZIP compression (1-9) | `6` |
-| `include_table_csv` | Include CSV format | `True` |
-| `include_table_parquet` | Include Parquet format | `True` |
-
-### Restore Configuration
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `restore_tables` | Restore tables | `True` |
-| `restore_files` | Restore files | `True` |
-| `table_format_preference` | Preferred format | `"parquet"` |
-| `overwrite_existing` | Overwrite existing data | `False` |
-| `verify_restore` | Verify after restore | `True` |
-| `dry_run` | Preview without changes | `False` |
-
-## 📁 Project Structure
+## 📁 Repository Structure
 
 ```
 fabric-lakehouse-backup/
-├── Fabric_Lakehouse_Combined_Backup.ipynb   # Complete backup notebook
-├── Fabric_Lakehouse_Restore.ipynb           # Restore notebook
-├── README.md                                 # This file
-├── LICENSE                                   # MIT License
-├── CONTRIBUTING.md                          # Contribution guidelines
-├── docs/                                    # Documentation
-│   ├── backup-guide.md                     # Detailed backup guide
-│   ├── restore-guide.md                    # Detailed restore guide
-│   ├── troubleshooting.md                  # Common issues & solutions
-│   └── advanced-usage.md                   # Advanced scenarios
-├── examples/                               # Example configurations
-│   ├── backup-examples.md                 # Backup examples
-│   └── restore-examples.md                # Restore examples
-└── scripts/                               # Helper scripts
-    ├── validate-backup.py                 # Backup validation
-    └── migration-helper.py                # Migration utilities
+├── README.md                                    # This file
+├── LICENSE                                      # MIT License
+├── nb_lakehouse_backup.Notebook/
+│   └── notebook-content.py                      # Backup notebook (PySpark)
+├── nb_lakehouse_restore.Notebook/
+│   └── notebook-content.py                      # Restore notebook (PySpark)
+├── pipeline.notebook.lakehouse.backup.yml       # Manual backup pipeline
+├── pipeline.notebook.lakehouse.backup.scheduled.yml  # Scheduled backup pipeline
+└── pipeline.notebook.lakehouse.restore.yml      # Restore pipeline
 ```
 
-## 🔍 Backup Contents
+## 🚀 Quick Start
 
-Each backup includes:
+### Prerequisites
 
-1. **Tables** (multiple formats for maximum compatibility):
-   - **CSV**: Human-readable, Excel-compatible
-   - **Parquet**: Optimized, type-preserving
-   - **Schema**: Column definitions and data types
-   - **Metadata**: Row counts, statistics
+Before you begin, ensure you have:
 
-2. **Files** (original formats perfectly preserved):
-   - Images (JPG, PNG, etc.)
-   - Documents (PDF, Word, Excel)
-   - Data files (CSV, JSON, etc.)
-   - Any other file type
+1. **Microsoft Fabric Workspace** with appropriate permissions
+2. **Azure DevOps Organization** with pipelines enabled
+3. **Azure Subscription** for Service Principal authentication
+4. **Service Principal** configured with Fabric API access
 
-3. **Metadata**:
-   - Backup timestamp and configuration
-   - File inventory and structure
-   - Restore instructions
-   - Verification checksums
+### Step 1: Set Up Azure Service Principal
 
-## 🛠️ Advanced Usage
+1. **Create a Service Principal in Azure AD**:
+   ```bash
+   az ad sp create-for-rbac --name "sp-fabric-backup" --role Contributor
+   ```
 
-### Selective Backup
-```python
-# Backup specific tables only
-restore_specific_tables = ["customers", "orders"]
+2. **Grant Fabric API Permissions**:
+   - Navigate to Azure Portal → Microsoft Entra ID → App registrations
+   - Select your Service Principal
+   - Go to **API permissions** → **Add a permission**
+   - Select **Power BI Service** (this covers Fabric API)
+   - Add delegated permissions:
+     - `Workspace.ReadWrite.All`
+     - `Item.Execute.All`
+     - `Item.ReadWrite.All`
+   - Click **Grant admin consent**
 
-# Backup specific file patterns
-restore_specific_files = ["*.pdf", "images/*.jpg"]
+3. **Add Service Principal to Fabric Workspace**:
+   - Open Microsoft Fabric portal
+   - Go to your workspace → **Manage access**
+   - Add the Service Principal with **Admin** or **Member** role
+
+### Step 2: Configure Azure DevOps
+
+1. **Create Service Connection**:
+   - Go to Azure DevOps → Project Settings → Service connections
+   - Create new **Azure Resource Manager** connection
+   - Select **Service Principal (manual)** or **Service Principal (automatic)**
+   - Name it following the pattern: `sp-{subscription-type}-{environment}-01`
+   - Example: `sp-alz-dpora-dev-01`
+
+2. **Create Variable Groups**:
+   Create variable groups for each environment (`fabric-workspaces-dev`, `fabric-workspaces-tst`, `fabric-workspaces-prd`) with these variables:
+
+   | Variable Name | Description | Example |
+   |--------------|-------------|---------|
+   | `lakehouse_backup_workspace_id` | Workspace ID where backup notebook resides | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+   | `silver1_lakehouse_name` | Source lakehouse name | `lh_silver1` |
+   | `silver2_lakehouse_name` | Source lakehouse name | `lh_silver2` |
+   | `transform_workspace_name` | Source workspace name | `wsp_transform_dev` |
+
+3. **Create Settings File** (if using templates):
+   Create a `settings.yml` file in the parent directory with shared variables:
+   ```yaml
+   # settings.yml - Shared pipeline variables
+   variables:
+     - name: organization_name
+       value: "your-org"
+   ```
+
+### Step 3: Deploy Notebooks to Fabric
+
+1. **Import Notebooks**:
+   - Open Microsoft Fabric portal
+   - Navigate to your backup workspace
+   - Click **Import** → **Notebook**
+   - Upload `nb_lakehouse_backup.Notebook/notebook-content.py`
+   - Upload `nb_lakehouse_restore.Notebook/notebook-content.py`
+   - Rename them to `nb_lakehouse_backup` and `nb_lakehouse_restore`
+
+2. **Create Backup Lakehouse**:
+   - In your backup workspace, create a new Lakehouse
+   - Name it following the pattern: `lh_{env}_backup` (e.g., `lh_dev_backup`)
+
+### Step 4: Create Azure DevOps Pipelines
+
+1. **Import Pipeline Files**:
+   - Go to Azure DevOps → Pipelines → New pipeline
+   - Select your repository
+   - Choose "Existing Azure Pipelines YAML file"
+   - Select the appropriate pipeline file
+
+2. **Available Pipelines**:
+   - `pipeline.notebook.lakehouse.backup.yml` - Manual on-demand backup
+   - `pipeline.notebook.lakehouse.backup.scheduled.yml` - Automated daily backup
+   - `pipeline.notebook.lakehouse.restore.yml` - Restore from backup
+
+## 📖 Usage
+
+### Running a Manual Backup
+
+1. Go to Azure DevOps Pipelines
+2. Select **Lakehouse Backup** pipeline
+3. Click **Run pipeline**
+4. Fill in the parameters:
+   - **Environment**: `dev`, `tst`, or `prd`
+   - **Source Lakehouse Name**: e.g., `lh_silver1`
+   - **Source Workspace Name**: e.g., `wsp_transform_dev`
+   - **Backup Tables**: `true` or `false`
+   - **Backup Files**: `true` or `false`
+
+### Automated Scheduled Backups
+
+The scheduled pipeline runs automatically:
+- **Schedule**: Daily at 12:30 AM AEST (14:30 UTC)
+- **Default**: Backs up all configured lakehouses
+
+To modify the schedule, edit the cron expression in `pipeline.notebook.lakehouse.backup.scheduled.yml`:
+```yaml
+schedules:
+  - cron: "30 14 * * *"  # Modify this cron expression
 ```
 
-### Custom Storage Authentication
-```python
-# Use specific credentials
-use_managed_identity = False
-# Configure custom authentication in notebook
+### Restoring from Backup
+
+1. Go to Azure DevOps Pipelines
+2. Select **Lakehouse Restore** pipeline
+3. Click **Run pipeline**
+4. Fill in the parameters:
+   - **Environment**: `dev`, `tst`, or `prd`
+   - **Backup Path**: e.g., `silver1_transform_dev_backup_2025-11-10_14-30-15`
+   - **Target Lakehouse Name**: e.g., `lh_silver1_restored`
+   - **Target Workspace Name**: e.g., `wsp_transform_dev`
+   - **Restore Tables**: `true` or `false`
+   - **Restore Files**: `true` or `false`
+   - **Overwrite Existing**: `true` or `false`
+
+## 🔧 Configuration
+
+### Backup Naming Convention
+
+Backups are automatically named using this pattern:
+```
+{lakehouse_short}_{workspace_short}_backup_{timestamp}
+```
+Example: `silver1_transform_dev_backup_2025-11-10_14-30-15`
+
+### Backup Storage Structure
+
+```
+backup_lakehouse/Files/
+└── silver1_transform_dev_backup_2025-11-10_14-30-15/
+    ├── tables/
+    │   ├── customers/                 # Delta table
+    │   ├── customers_metadata/        # Table metadata
+    │   ├── orders/
+    │   └── orders_metadata/
+    ├── files/
+    │   ├── reports/
+    │   │   └── monthly_report.pdf
+    │   └── data/
+    │       └── import.csv
+    ├── _manifest/                     # Backup manifest
+    └── _logs/                         # Execution logs
 ```
 
-### Large Dataset Handling
-```python
-# Adjust limits for large datasets
-max_table_rows_in_zip = 500000
-max_single_file_mb = 500
-compression_level = 9  # Maximum compression
-```
+### Notebook Parameters
 
-## 🚀 New in Version 2.0
+#### Backup Notebook (`nb_lakehouse_backup`)
 
-### Enterprise-Ready Features
-- **🔧 Configuration Management**: Use `config/config.json` for environment-specific settings
-- **📊 Performance Monitoring**: Built-in performance tracking with optimization suggestions  
-- **🔒 Security & Compliance**: Comprehensive audit trails and compliance reporting
-- **🧪 Testing Suite**: Complete test coverage with GitHub Actions CI/CD
-- **📈 Enhanced Logging**: Detailed operation logs with security event tracking
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source_lakehouse_name` | string | Name of the lakehouse to backup |
+| `source_workspace_name` | string | Name of the source workspace |
+| `backup_lakehouse_name` | string | Name of the backup lakehouse |
+| `backup_workspace_name` | string | Name of the backup workspace |
+| `backup_tables` | boolean | Whether to backup tables |
+| `backup_files` | boolean | Whether to backup files |
 
-### Quick Configuration Setup
-```bash
-# Copy template and customize
-cp config/config.template.json config/config.json
+#### Restore Notebook (`nb_lakehouse_restore`)
 
-# Edit for your environment
-{
-  "environments": {
-    "production": {
-      "source_workspace_id": "your-prod-workspace",
-      "backup_workspace_id": "your-backup-workspace",
-      "retention_days": 90
-    }
-  }
-}
-```
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `backup_lakehouse_name` | string | Name of the backup lakehouse |
+| `backup_workspace_name` | string | Name of the backup workspace |
+| `backup_path` | string | Path to the backup folder |
+| `target_lakehouse_name` | string | Name of the target lakehouse |
+| `target_workspace_name` | string | Name of the target workspace |
+| `restore_tables` | boolean | Whether to restore tables |
+| `restore_files` | boolean | Whether to restore files |
+| `overwrite_existing` | boolean | Whether to overwrite existing data |
 
-### Performance Monitoring
-```python
-# Add to your notebooks
-from scripts.performance_monitor import PerformanceMonitor
+## 🔐 Security Considerations
 
-monitor = PerformanceMonitor()
-monitor.start_operation("backup_tables")
-# ... your backup code ...
-metrics = monitor.end_operation(rows_processed=1000000)
+### Service Principal Best Practices
 
-# Get optimization suggestions
-suggestions = monitor.get_optimization_suggestions()
-```
+1. **Least Privilege**: Grant only necessary permissions to the Service Principal
+2. **Secret Rotation**: Regularly rotate Service Principal secrets
+3. **Audit Logging**: Enable Azure AD sign-in logs for the Service Principal
+4. **Conditional Access**: Consider applying conditional access policies
 
-## 🔒 Security & Best Practices
+### Azure DevOps Security
 
-- **Managed Identity**: Use Azure Managed Identity for secure authentication
-- **Encryption**: All data encrypted in transit and at rest
-- **Access Control**: Implement proper RBAC on storage accounts
-- **Retention**: Configure retention policies for backup cleanup
-- **Verification**: Always verify backups before deleting source data
+1. **Variable Groups**: Store sensitive values as secrets in variable groups
+2. **Pipeline Permissions**: Restrict who can run backup/restore pipelines
+3. **Approval Gates**: Add approval gates for production restores
+4. **Branch Policies**: Protect pipeline YAML files with branch policies
 
-## 🆘 Troubleshooting
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-1. **Authentication Errors**
-   - Ensure Managed Identity has proper permissions
-   - Check workspace and storage account access
+**Issue**: `Notebook not found in workspace`
+- **Solution**: Ensure the notebook is imported with the exact name (`nb_lakehouse_backup` or `nb_lakehouse_restore`)
 
-2. **Large File Handling**
-   - Adjust `max_single_file_mb` for large files
-   - Consider separate backup for very large files
+**Issue**: `Failed to resolve workspace ID`
+- **Solution**: Verify the variable group contains `lakehouse_backup_workspace_id`
 
-3. **Memory Issues**
-   - Reduce `max_table_rows_in_zip` for large tables
-   - Use higher compression levels
+**Issue**: `Access denied to Fabric API`
+- **Solution**: 
+  1. Verify Service Principal has Fabric API permissions
+  2. Check Service Principal is added to the workspace with sufficient role
+  3. Ensure admin consent is granted for API permissions
 
-See [troubleshooting.md](docs/troubleshooting.md) for detailed solutions.
+**Issue**: `Ancient datetime handling errors`
+- **Solution**: The notebooks are pre-configured for legacy dates. If issues persist, verify Spark configuration in the notebook.
+
+### Monitoring Backups
+
+1. **Fabric Monitoring Hub**: View notebook execution status at [https://app.fabric.microsoft.com/monitoringhub](https://app.fabric.microsoft.com/monitoringhub)
+2. **Azure DevOps**: Check pipeline run logs for detailed output
+3. **Backup Manifest**: Each backup includes a `_manifest` table with execution details
+
+## 📊 Backup Retention
+
+The default retention period is **30 days**. To implement automatic cleanup:
+
+1. Create a separate cleanup notebook
+2. Schedule it to run periodically
+3. Delete backups older than the retention period
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📝 License
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-- Microsoft Fabric team for the amazing platform
-- Open source community for inspiration and feedback
+- Microsoft Fabric team for the powerful lakehouse capabilities
+- Azure DevOps for CI/CD pipeline support
+- The open-source community for continuous improvement
 
-## 📞 Support
+## 📬 Support
 
-- 🐛 **Issues**: Report bugs via GitHub Issues
-- 💡 **Feature Requests**: Suggest features via GitHub Issues
-- 📖 **Documentation**: Check the `docs/` folder
-- 💬 **Discussions**: Use GitHub Discussions for questions
+If you encounter any issues or have questions:
 
----
-
-**Made with ❤️ for the Microsoft Fabric community**
-
-### Helper Tools & Scripts
-- **Migration Helper**: Convert legacy backups to new format (`scripts/migration-helper.py`)
-- **Backup Validator**: Verify backup integrity (`scripts/validate-backup.py`) 
-- **Performance Monitor**: Track and optimize backup performance (`scripts/performance_monitor.py`)
-- **Configuration Loader**: Manage environment-specific settings (`scripts/config_loader.py`)
-- **Security Utils**: Audit logging and compliance features (`scripts/security_utils.py`)
+1. Check the [Troubleshooting](#-troubleshooting) section
+2. Open an issue in this repository
+3. Review Microsoft Fabric documentation at [https://learn.microsoft.com/fabric](https://learn.microsoft.com/fabric)

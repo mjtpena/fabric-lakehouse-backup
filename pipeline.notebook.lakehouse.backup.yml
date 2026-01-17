@@ -1,0 +1,374 @@
+# =============================================================================
+# Microsoft Fabric Lakehouse Backup Pipeline (Manual)
+# =============================================================================
+# This pipeline triggers an on-demand backup of a Microsoft Fabric Lakehouse.
+# It uses a Service Principal to authenticate with the Fabric API and execute
+# a notebook that performs the backup operation.
+#
+# Prerequisites:
+#   1. Service Principal with Fabric API permissions
+#   2. Azure DevOps Service Connection configured
+#   3. Variable groups for each environment with workspace IDs
+#   4. Backup notebook deployed to your Fabric workspace
+#
+# See README.md for detailed setup instructions.
+# =============================================================================
+
+trigger: none
+
+# ---------- Pipeline Parameters ----------
+parameters:
+  - name: environment
+    displayName: Target Environment
+    type: string
+    values:
+      - dev
+      - tst
+      - prd
+    default: dev
+
+  - name: agentType
+    displayName: Agent Type
+    type: string
+    values:
+      - self-hosted
+      - ms-hosted
+    default: ms-hosted
+
+  - name: source_lakehouse_name
+    displayName: Source Lakehouse Name
+    type: string
+    default: " "
+    # Example: lh_silver1
+
+  - name: source_workspace_name
+    displayName: Source Workspace Name
+    type: string
+    default: " "
+    # Example: wsp_transform_dev
+
+  - name: backup_tables
+    displayName: Backup Tables
+    type: string
+    values:
+      - "true"
+      - "false"
+    default: "true"
+
+  - name: backup_files
+    displayName: Backup Files
+    type: string
+    values:
+      - "true"
+      - "false"
+    default: "true"
+
+  - name: timeout_in_minutes
+    displayName: Timeout in Minutes
+    type: number
+    default: 60
+
+# ---------- Variables ----------
+variables:
+  # -------------------------------------------------------------------------
+  # IMPORTANT: Customize these variables for your organization
+  # -------------------------------------------------------------------------
+  
+  # Import workspace ID variable groups based on selected environment
+  # These variable groups should contain:
+  #   - lakehouse_backup_workspace_id: GUID of the workspace containing backup notebook
+  - ${{ if eq(parameters.environment, 'dev') }}:
+    - group: 'fabric-workspaces-dev'
+  - ${{ elseif eq(parameters.environment, 'tst') }}:
+    - group: 'fabric-workspaces-tst'
+  - ${{ else }}:
+    - group: 'fabric-workspaces-prd'
+
+  # Service connection name pattern
+  # Modify this to match your Azure DevOps service connection naming convention
+  - name: serviceConnection
+    value: "fabric-service-connection-${{ parameters.environment }}"
+
+  # Agent pool for self-hosted agents (modify if using self-hosted)
+  - name: selfHostedAgentPoolName
+    value: "default"
+
+  # Notebook name (must match the notebook deployed in Fabric)
+  - name: notebook_name
+    value: "nb_lakehouse_backup"
+
+  # Environment display name
+  - name: environment_name
+    value: "${{ upper(parameters.environment) }}"
+
+  # Backup destination naming convention
+  # Modify these patterns to match your organization's naming standards
+  - name: backup_lakehouse_name
+    value: "lh_${{ lower(parameters.environment) }}_backup"
+
+  - name: backup_workspace_name
+    value: "ws-${{ lower(parameters.environment) }}-backup"
+
+  - name: timeout_in_minutes
+    value: "${{ parameters.timeout_in_minutes }}"
+
+# ---------- Stages ----------
+stages:
+  - stage: LakehouseBackup
+    displayName: "Lakehouse Backup - ${{ parameters.environment }}"
+    
+    # Select agent pool based on parameter
+    ${{ if eq(parameters.agentType, 'ms-hosted') }}:
+      pool:
+        vmImage: ubuntu-latest
+    ${{ else }}:
+      pool: $(selfHostedAgentPoolName)
+    
+    jobs:
+      - job: lakehouse_backup
+        displayName: Backup Lakehouse
+        timeoutInMinutes: ${{ parameters.timeout_in_minutes }}
+
+        steps:
+        # =====================================================================
+        # Step 1: Find the backup notebook in the Fabric workspace
+        # =====================================================================
+        - task: AzurePowerShell@5
+          displayName: 'Find Backup Notebook'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "🔍 STEP 1: Finding Backup Notebook"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              # Get workspace ID from variable group
+              $workspaceId = [System.Environment]::GetEnvironmentVariable("LAKEHOUSE_BACKUP_WORKSPACE_ID")
+              
+              if (-not $workspaceId) {
+                  Write-Host "❌ ERROR: LAKEHOUSE_BACKUP_WORKSPACE_ID not found"
+                  Write-Host ""
+                  Write-Host "💡 Make sure your variable group contains:"
+                  Write-Host "   - lakehouse_backup_workspace_id: <your-workspace-guid>"
+                  Write-Host ""
+                  Write-Host "Available environment variables:"
+                  Get-ChildItem env: | Where-Object { $_.Name -like "*LAKEHOUSE*" -or $_.Name -like "*WORKSPACE*" } | ForEach-Object {
+                      Write-Host "   - $($_.Name)"
+                  }
+                  exit 1
+              }
+              
+              Write-Host "✅ Workspace ID: $workspaceId"
+              
+              # Get access token for Fabric API
+              $bearerToken = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+              $headers = @{
+                "Authorization" = "Bearer $bearerToken"
+                "Content-Type"  = "application/json"
+              }
+              
+              # List notebooks in workspace
+              $apiUrl = "https://api.fabric.microsoft.com/v1/workspaces/$workspaceId/notebooks"
+              $list = Invoke-RestMethod -Uri $apiUrl -Headers $headers -Method GET
+              $notebookId = ($list.value | Where-Object {$_.displayName -eq "$(notebook_name)"}).id
+              
+              if (-not $notebookId) {
+                  Write-Host "❌ ERROR: Notebook '$(notebook_name)' not found"
+                  Write-Host ""
+                  Write-Host "📋 Available notebooks:"
+                  $list.value | ForEach-Object { Write-Host "   - $($_.displayName)" }
+                  exit 1
+              }
+              
+              Write-Host "✅ Found notebook: $(notebook_name)"
+              Write-Host "   ID: $notebookId"
+              
+              # Store variables for next step
+              Write-Host "##vso[task.setvariable variable=notebookId;]$notebookId"
+              Write-Host "##vso[task.setvariable variable=workspaceId;]$workspaceId"
+            azurePowerShellVersion: 'LatestVersion'
+
+        # =====================================================================
+        # Step 2: Execute the backup notebook with parameters
+        # =====================================================================
+        - task: AzurePowerShell@5
+          displayName: 'Execute Backup Notebook'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "🚀 STEP 2: Executing Backup Notebook"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              $workspaceId = "$(workspaceId)"
+              
+              # Get fresh token
+              $fabricToken = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+              $headers = @{
+                  "Authorization" = "Bearer $fabricToken"
+                  "Content-Type" = "application/json"
+              }
+              
+              # Get parameters
+              $sourceLakehouseName = "${{ parameters.source_lakehouse_name }}".Trim()
+              $sourceWorkspaceName = "${{ parameters.source_workspace_name }}".Trim()
+              $backupLakehouseName = "$(backup_lakehouse_name)"
+              $backupWorkspaceName = "$(backup_workspace_name)"
+              $backupTables = "${{ parameters.backup_tables }}"
+              $backupFiles = "${{ parameters.backup_files }}"
+              
+              # Validate required parameters
+              if (-not $sourceLakehouseName -or $sourceLakehouseName -eq " ") {
+                  Write-Host "❌ ERROR: source_lakehouse_name is required"
+                  exit 1
+              }
+              if (-not $sourceWorkspaceName -or $sourceWorkspaceName -eq " ") {
+                  Write-Host "❌ ERROR: source_workspace_name is required"
+                  exit 1
+              }
+              
+              Write-Host "📋 Backup Configuration:"
+              Write-Host "   Environment: $(environment_name)"
+              Write-Host "   Source Lakehouse: $sourceLakehouseName"
+              Write-Host "   Source Workspace: $sourceWorkspaceName"
+              Write-Host "   Backup Lakehouse: $backupLakehouseName"
+              Write-Host "   Backup Workspace: $backupWorkspaceName"
+              Write-Host "   Backup Tables: $backupTables"
+              Write-Host "   Backup Files: $backupFiles"
+              Write-Host ""
+              
+              # Build notebook parameters
+              $parametersDict = @{
+                  "source_lakehouse_name" = @{ "value" = $sourceLakehouseName; "type" = "string" }
+                  "source_workspace_name" = @{ "value" = $sourceWorkspaceName; "type" = "string" }
+                  "backup_lakehouse_name" = @{ "value" = $backupLakehouseName; "type" = "string" }
+                  "backup_workspace_name" = @{ "value" = $backupWorkspaceName; "type" = "string" }
+                  "backup_tables" = @{ "value" = [bool]::Parse($backupTables); "type" = "bool" }
+                  "backup_files" = @{ "value" = [bool]::Parse($backupFiles); "type" = "bool" }
+              }
+              
+              $body = @{
+                  "executionData" = @{ "parameters" = $parametersDict }
+              } | ConvertTo-Json -Depth 4
+              
+              # Start notebook execution
+              $startUrl = "https://api.fabric.microsoft.com/v1/workspaces/$workspaceId/items/$(notebookId)/jobs/instances?jobType=RunNotebook"
+              
+              try {
+                  $response = Invoke-RestMethod -Uri $startUrl -Headers $headers -Method POST -Body $body -ResponseHeadersVariable responseHeaders
+                  $statusUrl = $responseHeaders.location[0]
+                  $jobInstanceId = ($statusUrl -split "/")[-1]
+                  
+                  Write-Host "✅ Backup started successfully!"
+                  Write-Host "   Job ID: $jobInstanceId"
+                  Write-Host ""
+                  Write-Host "🔗 Monitor in Fabric: https://app.fabric.microsoft.com/monitoringhub"
+                  
+                  Write-Host "##vso[task.setvariable variable=statusUrl;]$statusUrl"
+                  Write-Host "##vso[task.setvariable variable=jobInstanceId;]$jobInstanceId"
+              }
+              catch {
+                  Write-Host "❌ Failed to start backup: $($_.Exception.Message)"
+                  exit 1
+              }
+            azurePowerShellVersion: 'LatestVersion'
+
+        # =====================================================================
+        # Step 3: Monitor backup execution until completion
+        # =====================================================================
+        - task: AzurePowerShell@5
+          displayName: 'Monitor Backup Execution'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "📊 STEP 3: Monitoring Backup Execution"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              # Token refresh function
+              function Get-FreshToken {
+                  $token = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+                  return @{
+                      "Authorization" = "Bearer $token"
+                      "Content-Type"  = "application/json"
+                  }
+              }
+              
+              $headers = Get-FreshToken
+              $lastTokenRefresh = Get-Date
+              $statusUrl = "$(statusUrl)"
+              
+              Write-Host "🔗 Fabric Monitoring Hub: https://app.fabric.microsoft.com/monitoringhub"
+              Write-Host ""
+              
+              # Calculate max attempts based on timeout
+              $timeoutMinutes = ${{ parameters.timeout_in_minutes }}
+              $maxAttempts = [math]::Ceiling($timeoutMinutes * 2)  # 30 second intervals
+              $attempt = 0
+              
+              Write-Host "⏱️ Timeout: $timeoutMinutes minutes"
+              Write-Host ""
+              
+              do {
+                  Start-Sleep -Seconds 30
+                  $attempt++
+                  
+                  # Refresh token every 15 minutes
+                  $timeSinceRefresh = (Get-Date) - $lastTokenRefresh
+                  if ($timeSinceRefresh.TotalSeconds -gt 900) {
+                      Write-Host "🔄 Refreshing token..."
+                      $headers = Get-FreshToken
+                      $lastTokenRefresh = Get-Date
+                  }
+                  
+                  try {
+                      $response = Invoke-RestMethod -Uri $statusUrl -Headers $headers -Method GET
+                      $status = $response.status
+                      $timestamp = Get-Date -Format "HH:mm:ss"
+                      
+                      Write-Host "[$timestamp] Status: $status"
+                      
+                      if ($status -eq "Completed") {
+                          Write-Host ""
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "✅ BACKUP COMPLETED SUCCESSFULLY!"
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "   Duration: $([math]::Round($attempt * 30 / 60, 1)) minutes"
+                          break
+                      }
+                      elseif ($status -eq "Failed") {
+                          Write-Host ""
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "❌ BACKUP FAILED!"
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "##vso[task.logissue type=error]Backup failed. Check Fabric Monitoring Hub."
+                          Write-Host "Response: $($response | ConvertTo-Json -Depth 5)"
+                          exit 1
+                      }
+                      elseif ($status -eq "Cancelled") {
+                          Write-Host ""
+                          Write-Host "⚠️ Backup was cancelled!"
+                          Write-Host "##vso[task.logissue type=warning]Backup cancelled."
+                          exit 1
+                      }
+                  }
+                  catch {
+                      Write-Host "⚠️ Status check error: $($_.Exception.Message)"
+                      if ($attempt -gt 5) { throw }
+                  }
+              } while ($attempt -lt $maxAttempts)
+              
+              if ($attempt -ge $maxAttempts) {
+                  Write-Host ""
+                  Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  Write-Host "❌ BACKUP TIMED OUT"
+                  Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  Write-Host "##vso[task.logissue type=error]Backup timed out after $timeoutMinutes minutes."
+                  Write-Host ""
+                  Write-Host "💡 The backup may still be running. Check Fabric Monitoring Hub."
+                  exit 1
+              }
+            azurePowerShellVersion: 'LatestVersion'

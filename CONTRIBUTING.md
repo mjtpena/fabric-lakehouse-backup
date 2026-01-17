@@ -1,176 +1,162 @@
-# Contributing to Microsoft Fabric Lakehouse Backup Tools
+# Contributing to Fabric Lakehouse Backup & Restore
 
-Thank you for your interest in contributing to this project! We welcome contributions from the community.
+First off, thank you for considering contributing to this project! 🎉
 
-## 🤝 How to Contribute
+## How Can I Contribute?
 
-### Reporting Issues
-- Use GitHub Issues to report bugs or request features
-- Provide detailed information about your environment
-- Include error messages and logs when applicable
-- Use the issue templates when available
+### Reporting Bugs
 
-### Submitting Changes
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Test your changes thoroughly
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+Before creating bug reports, please check the existing issues to avoid duplicates. When you create a bug report, include as many details as possible:
 
-## 📋 Development Guidelines
+- **Use a clear and descriptive title**
+- **Describe the exact steps to reproduce the problem**
+- **Provide specific examples** (e.g., lakehouse names, workspace configurations)
+- **Describe the behavior you observed and what you expected**
+- **Include logs** from Azure DevOps pipeline runs or notebook execution
+- **Include your environment details** (Fabric capacity type, region, etc.)
 
-### Code Style
-- Follow PEP 8 for Python code
-- Use meaningful variable names
-- Add comments for complex logic
-- Keep functions focused and single-purpose
+### Suggesting Enhancements
 
-### Notebook Development
-- Test notebooks in Microsoft Fabric environment
-- Ensure notebooks work with different data sizes
-- Include error handling and logging
-- Document configuration parameters clearly
+Enhancement suggestions are tracked as GitHub issues. When creating an enhancement suggestion:
 
-### Documentation
-- Update README.md for new features
-- Add examples for new functionality
-- Keep documentation current with code changes
-- Use clear, concise language
+- **Use a clear and descriptive title**
+- **Provide a detailed description** of the suggested enhancement
+- **Explain why this enhancement would be useful**
+- **List any alternatives you've considered**
 
-## 🧪 Testing
+### Pull Requests
 
-### Before Submitting
-- Test with small and large datasets
-- Verify backup and restore cycles
-- Test with different storage types
-- Check error handling scenarios
+1. **Fork the repository** and create your branch from `main`
+2. **Make your changes** following the coding standards below
+3. **Test your changes** with your own Fabric environment
+4. **Update documentation** if needed
+5. **Submit your pull request**
 
-### Test Environments
-- Microsoft Fabric workspace
-- Various lakehouse sizes
-- Different file types and structures
-- Multiple storage authentication methods
-
-## 📝 Pull Request Process
-
-1. **Description**: Provide a clear description of changes
-2. **Testing**: Include test results and scenarios covered
-3. **Documentation**: Update relevant documentation
-4. **Breaking Changes**: Clearly mark any breaking changes
-5. **Review**: Be responsive to review feedback
-
-## 🏗️ Project Structure
-
-```
-fabric-lakehouse-backup/
-├── *.ipynb                 # Notebook files
-├── README.md              # Main documentation
-├── docs/                  # Additional documentation
-├── examples/              # Usage examples
-└── scripts/               # Helper scripts
-```
-
-## 🎯 Contribution Areas
-
-We especially welcome contributions in these areas:
-
-### Core Features
-- Performance optimizations
-- Additional storage backends
-- Enhanced error handling
-- Memory usage improvements
-
-### Documentation
-- More usage examples
-- Troubleshooting guides
-- Video tutorials
-- Best practices documentation
-
-### Testing
-- Automated testing scripts
-- Edge case scenarios
-- Performance benchmarks
-- Compatibility testing
-
-### Tools & Scripts
-- Validation utilities
-- Migration helpers
-- Monitoring scripts
-- Configuration generators
-
-## 🐛 Bug Reports
-
-When reporting bugs, please include:
-- Microsoft Fabric environment details
-- Notebook runtime information
-- Complete error messages
-- Steps to reproduce
-- Expected vs actual behavior
-- Sample data (if safe to share)
-
-## 💡 Feature Requests
-
-For feature requests, please provide:
-- Clear use case description
-- Expected behavior
-- Alternative solutions considered
-- Impact on existing functionality
-
-## 📞 Getting Help
-
-- **Questions**: Use GitHub Discussions
-- **Issues**: Use GitHub Issues
-- **Documentation**: Check the `docs/` folder first
-
-## 🏆 Recognition
-
-Contributors will be recognized in:
-- README.md contributors section
-- Release notes for significant contributions
-- Project documentation
-
-## 📄 Code of Conduct
-
-### Our Pledge
-We pledge to make participation in our project a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
-
-### Our Standards
-- Using welcoming and inclusive language
-- Being respectful of differing viewpoints
-- Gracefully accepting constructive criticism
-- Focusing on what is best for the community
-- Showing empathy towards other community members
-
-### Enforcement
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project team. All complaints will be reviewed and investigated promptly and fairly.
-
-## 📋 Development Setup
+## Development Setup
 
 ### Prerequisites
-- Microsoft Fabric workspace access
-- PySpark/Jupyter environment for testing
-- Git for version control
+
+- Microsoft Fabric workspace with Lakehouse capabilities
+- Azure DevOps organization
+- Azure subscription for Service Principal authentication
 
 ### Local Development
-1. Clone the repository
-2. Create a test workspace in Microsoft Fabric
-3. Upload notebooks to test environment
-4. Make changes and test thoroughly
-5. Submit pull request
 
-## 🚀 Release Process
+1. Clone your fork:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/fabric-lakehouse-backup.git
+   cd fabric-lakehouse-backup
+   ```
 
-### Versioning
-We use semantic versioning (SemVer):
-- **Major**: Breaking changes
-- **Minor**: New features (backward compatible)
-- **Patch**: Bug fixes
+2. Create a branch:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
 
-### Release Cycle
-- Regular maintenance releases
-- Feature releases based on community needs
-- Security updates as needed
+3. Make your changes and test them in your Fabric environment
 
-Thank you for contributing to Microsoft Fabric Lakehouse Backup Tools! 🎉
+4. Commit your changes:
+   ```bash
+   git commit -m "Add: brief description of your changes"
+   ```
+
+5. Push to your fork:
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+
+6. Open a Pull Request
+
+## Coding Standards
+
+### Python (Notebooks)
+
+- Follow PEP 8 style guidelines
+- Use meaningful variable and function names
+- Add docstrings to all functions
+- Include logging for important operations
+- Handle exceptions gracefully with informative error messages
+
+Example:
+```python
+def backup_table(source_path: str, destination_path: str, table_name: str) -> dict:
+    """
+    Backup a single Delta table from source to destination.
+    
+    Args:
+        source_path: The ABFS path to the source table
+        destination_path: The ABFS path for the backup
+        table_name: Name of the table being backed up
+    
+    Returns:
+        dict: Result containing success status and metadata
+    
+    Raises:
+        ValueError: If paths are invalid
+    """
+    try:
+        log_message(f"Starting backup of table: {table_name}", "INFO")
+        # ... implementation
+    except Exception as e:
+        log_message(f"Failed to backup table {table_name}: {str(e)}", "ERROR")
+        raise
+```
+
+### YAML (Pipelines)
+
+- Use clear, descriptive names for stages, jobs, and steps
+- Add comments explaining complex logic
+- Use variables for values that might change
+- Follow consistent indentation (2 spaces)
+
+Example:
+```yaml
+# Stage: Backup the specified lakehouse
+- stage: LakehouseBackup
+  displayName: "Lakehouse Backup"
+  jobs:
+    - job: backup_lakehouse
+      displayName: Backup Lakehouse
+      steps:
+        # Step 1: Authenticate and find the notebook
+        - task: AzurePowerShell@5
+          displayName: Acquire Backup Notebook
+```
+
+### PowerShell (Pipeline Scripts)
+
+- Use Write-Host with emojis for visual feedback
+- Include proper error handling with try/catch
+- Log important variables and steps
+- Use meaningful variable names
+
+## Commit Messages
+
+Use clear and descriptive commit messages:
+
+- `Add:` for new features
+- `Fix:` for bug fixes
+- `Update:` for changes to existing functionality
+- `Docs:` for documentation changes
+- `Refactor:` for code refactoring
+
+Examples:
+- `Add: Support for selective table restore`
+- `Fix: Token refresh issue during long-running backups`
+- `Docs: Update README with new parameters`
+
+## Testing
+
+Before submitting a PR:
+
+1. **Test backup functionality** with your own lakehouse
+2. **Test restore functionality** to a new or existing lakehouse
+3. **Verify pipeline execution** in Azure DevOps
+4. **Check logging** for appropriate messages
+5. **Validate error handling** with intentionally invalid inputs
+
+## Questions?
+
+Feel free to open an issue with your question or reach out through GitHub Discussions.
+
+Thank you for contributing! 🙏

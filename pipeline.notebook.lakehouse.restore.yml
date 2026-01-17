@@ -1,0 +1,402 @@
+# =============================================================================
+# Microsoft Fabric Lakehouse Restore Pipeline
+# =============================================================================
+# This pipeline restores a Microsoft Fabric Lakehouse from a backup.
+# It uses a Service Principal to authenticate with the Fabric API and execute
+# a notebook that performs the restore operation.
+#
+# Prerequisites:
+#   1. Service Principal with Fabric API permissions
+#   2. Azure DevOps Service Connection configured
+#   3. Variable groups for each environment with workspace IDs
+#   4. Restore notebook deployed to your Fabric workspace
+#   5. Valid backup path from a previous backup
+#
+# See README.md for detailed setup instructions.
+# =============================================================================
+
+trigger: none
+
+# ---------- Pipeline Parameters ----------
+parameters:
+  - name: environment
+    displayName: Target Environment
+    type: string
+    values:
+      - dev
+      - tst
+      - prd
+    default: dev
+
+  - name: agentType
+    displayName: Agent Type
+    type: string
+    values:
+      - self-hosted
+      - ms-hosted
+    default: ms-hosted
+
+  - name: backup_path
+    displayName: Backup Path
+    type: string
+    default: " "
+    # Example: silver1_transform_dev_backup_2025-11-10_14-30-15
+
+  - name: target_lakehouse_name
+    displayName: Target Lakehouse Name
+    type: string
+    default: " "
+    # Example: lh_silver1_restored
+
+  - name: target_workspace_name
+    displayName: Target Workspace Name
+    type: string
+    default: " "
+    # Example: wsp_transform_dev
+
+  - name: restore_tables
+    displayName: Restore Tables
+    type: string
+    values:
+      - "true"
+      - "false"
+    default: "true"
+
+  - name: restore_files
+    displayName: Restore Files
+    type: string
+    values:
+      - "true"
+      - "false"
+    default: "true"
+
+  - name: overwrite_existing
+    displayName: Overwrite Existing Tables/Files
+    type: string
+    values:
+      - "true"
+      - "false"
+    default: "true"
+
+  - name: timeout_in_minutes
+    displayName: Timeout in Minutes
+    type: number
+    default: 90
+
+# ---------- Variables ----------
+variables:
+  # -------------------------------------------------------------------------
+  # IMPORTANT: Customize these for your organization
+  # -------------------------------------------------------------------------
+  
+  # Import workspace ID variable groups
+  - ${{ if eq(parameters.environment, 'dev') }}:
+    - group: 'fabric-workspaces-dev'
+  - ${{ elseif eq(parameters.environment, 'tst') }}:
+    - group: 'fabric-workspaces-tst'
+  - ${{ else }}:
+    - group: 'fabric-workspaces-prd'
+
+  # Service connection name
+  - name: serviceConnection
+    value: "fabric-service-connection-${{ parameters.environment }}"
+
+  # Agent pool for self-hosted agents
+  - name: selfHostedAgentPoolName
+    value: "default"
+
+  # Notebook name
+  - name: notebook_name
+    value: "nb_lakehouse_restore"
+
+  # Environment display name
+  - name: environment_name
+    value: "${{ upper(parameters.environment) }}"
+
+  # Backup source location
+  - name: backup_lakehouse_name
+    value: "lh_${{ lower(parameters.environment) }}_backup"
+
+  - name: backup_workspace_name
+    value: "ws-${{ lower(parameters.environment) }}-backup"
+
+  - name: timeout_in_minutes
+    value: "${{ parameters.timeout_in_minutes }}"
+
+# ---------- Stages ----------
+stages:
+  - stage: LakehouseRestore
+    displayName: "Lakehouse Restore - ${{ parameters.environment }}"
+    
+    ${{ if eq(parameters.agentType, 'ms-hosted') }}:
+      pool:
+        vmImage: ubuntu-latest
+    ${{ else }}:
+      pool: $(selfHostedAgentPoolName)
+    
+    jobs:
+      - job: lakehouse_restore
+        displayName: Restore Lakehouse
+        timeoutInMinutes: ${{ parameters.timeout_in_minutes }}
+
+        steps:
+        # =====================================================================
+        # Step 1: Find the restore notebook in the Fabric workspace
+        # =====================================================================
+        - task: AzurePowerShell@5
+          displayName: 'Find Restore Notebook'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "🔍 STEP 1: Finding Restore Notebook"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              $workspaceId = [System.Environment]::GetEnvironmentVariable("LAKEHOUSE_BACKUP_WORKSPACE_ID")
+              
+              if (-not $workspaceId) {
+                  Write-Host "❌ ERROR: LAKEHOUSE_BACKUP_WORKSPACE_ID not found"
+                  Write-Host ""
+                  Write-Host "💡 Make sure your variable group contains:"
+                  Write-Host "   - lakehouse_backup_workspace_id: <your-workspace-guid>"
+                  exit 1
+              }
+              
+              Write-Host "✅ Workspace ID: $workspaceId"
+              
+              $bearerToken = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+              $headers = @{
+                "Authorization" = "Bearer $bearerToken"
+                "Content-Type"  = "application/json"
+              }
+              
+              $apiUrl = "https://api.fabric.microsoft.com/v1/workspaces/$workspaceId/notebooks"
+              $list = Invoke-RestMethod -Uri $apiUrl -Headers $headers -Method GET
+              $notebookId = ($list.value | Where-Object {$_.displayName -eq "$(notebook_name)"}).id
+              
+              if (-not $notebookId) {
+                  Write-Host "❌ ERROR: Notebook '$(notebook_name)' not found"
+                  Write-Host ""
+                  Write-Host "📋 Available notebooks:"
+                  $list.value | ForEach-Object { Write-Host "   - $($_.displayName)" }
+                  exit 1
+              }
+              
+              Write-Host "✅ Found notebook: $(notebook_name)"
+              Write-Host "   ID: $notebookId"
+              
+              Write-Host "##vso[task.setvariable variable=notebookId;]$notebookId"
+              Write-Host "##vso[task.setvariable variable=workspaceId;]$workspaceId"
+            azurePowerShellVersion: 'LatestVersion'
+
+        # =====================================================================
+        # Step 2: Execute the restore notebook with parameters
+        # =====================================================================
+        - task: AzurePowerShell@5
+          displayName: 'Execute Restore Notebook'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "🔄 STEP 2: Executing Restore Notebook"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              $workspaceId = "$(workspaceId)"
+              
+              $fabricToken = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+              $headers = @{
+                  "Authorization" = "Bearer $fabricToken"
+                  "Content-Type" = "application/json"
+              }
+              
+              # Get parameters
+              $backupLakehouseName = "$(backup_lakehouse_name)"
+              $backupWorkspaceName = "$(backup_workspace_name)"
+              $backupPath = "${{ parameters.backup_path }}".Trim()
+              $targetLakehouseName = "${{ parameters.target_lakehouse_name }}".Trim()
+              $targetWorkspaceName = "${{ parameters.target_workspace_name }}".Trim()
+              $restoreTables = "${{ parameters.restore_tables }}"
+              $restoreFiles = "${{ parameters.restore_files }}"
+              $overwriteExisting = "${{ parameters.overwrite_existing }}"
+              
+              # Validate required parameters
+              if (-not $backupPath -or $backupPath -eq " ") {
+                  Write-Host "❌ ERROR: backup_path is required"
+                  Write-Host "   Example: silver1_transform_dev_backup_2025-11-10_14-30-15"
+                  exit 1
+              }
+              if (-not $targetLakehouseName -or $targetLakehouseName -eq " ") {
+                  Write-Host "❌ ERROR: target_lakehouse_name is required"
+                  exit 1
+              }
+              if (-not $targetWorkspaceName -or $targetWorkspaceName -eq " ") {
+                  Write-Host "❌ ERROR: target_workspace_name is required"
+                  exit 1
+              }
+              
+              Write-Host "📋 Restore Configuration:"
+              Write-Host "   Environment: $(environment_name)"
+              Write-Host "   Backup Lakehouse: $backupLakehouseName"
+              Write-Host "   Backup Workspace: $backupWorkspaceName"
+              Write-Host "   Backup Path: $backupPath"
+              Write-Host "   Target Lakehouse: $targetLakehouseName"
+              Write-Host "   Target Workspace: $targetWorkspaceName"
+              Write-Host "   Restore Tables: $restoreTables"
+              Write-Host "   Restore Files: $restoreFiles"
+              Write-Host "   Overwrite Existing: $overwriteExisting"
+              Write-Host ""
+              
+              if ($overwriteExisting -eq "true") {
+                  Write-Host "⚠️  WARNING: Overwrite is enabled. Existing data will be replaced!"
+                  Write-Host ""
+              }
+              
+              # Build notebook parameters
+              $parametersDict = @{
+                  "backup_lakehouse_name" = @{ "value" = $backupLakehouseName; "type" = "string" }
+                  "backup_workspace_name" = @{ "value" = $backupWorkspaceName; "type" = "string" }
+                  "backup_path" = @{ "value" = $backupPath; "type" = "string" }
+                  "target_lakehouse_name" = @{ "value" = $targetLakehouseName; "type" = "string" }
+                  "target_workspace_name" = @{ "value" = $targetWorkspaceName; "type" = "string" }
+                  "restore_tables" = @{ "value" = [bool]::Parse($restoreTables); "type" = "bool" }
+                  "restore_files" = @{ "value" = [bool]::Parse($restoreFiles); "type" = "bool" }
+                  "overwrite_existing" = @{ "value" = [bool]::Parse($overwriteExisting); "type" = "bool" }
+              }
+              
+              $body = @{
+                  "executionData" = @{ "parameters" = $parametersDict }
+              } | ConvertTo-Json -Depth 4
+              
+              $startUrl = "https://api.fabric.microsoft.com/v1/workspaces/$workspaceId/items/$(notebookId)/jobs/instances?jobType=RunNotebook"
+              
+              try {
+                  $response = Invoke-RestMethod -Uri $startUrl -Headers $headers -Method POST -Body $body -ResponseHeadersVariable responseHeaders
+                  $statusUrl = $responseHeaders.location[0]
+                  $jobInstanceId = ($statusUrl -split "/")[-1]
+                  
+                  Write-Host "✅ Restore started successfully!"
+                  Write-Host "   Job ID: $jobInstanceId"
+                  Write-Host ""
+                  Write-Host "🔗 Monitor in Fabric: https://app.fabric.microsoft.com/monitoringhub"
+                  Write-Host ""
+                  Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  Write-Host "📊 Fabric Portal URL:"
+                  Write-Host "   https://app.fabric.microsoft.com/groups/$workspaceId/items/$(notebookId)"
+                  Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  
+                  Write-Host "##vso[task.setvariable variable=statusUrl;]$statusUrl"
+                  Write-Host "##vso[task.setvariable variable=jobInstanceId;]$jobInstanceId"
+              }
+              catch {
+                  Write-Host "❌ Failed to start restore: $($_.Exception.Message)"
+                  
+                  Write-Host ""
+                  Write-Host "🔍 Troubleshooting:"
+                  Write-Host "   1. Verify the backup path exists: $backupPath"
+                  Write-Host "   2. Check the target lakehouse exists"
+                  Write-Host "   3. Verify Service Principal permissions"
+                  exit 1
+              }
+            azurePowerShellVersion: 'LatestVersion'
+
+        # =====================================================================
+        # Step 3: Monitor restore execution (fire-and-forget option)
+        # =====================================================================
+        # Note: Restore operations can take a long time depending on data size.
+        # The pipeline starts the restore and provides monitoring links.
+        # For long restores, consider using fire-and-forget approach.
+        
+        - task: AzurePowerShell@5
+          displayName: 'Monitor Restore (Initial Status)'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "📊 STEP 3: Monitoring Restore Execution"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              function Get-FreshToken {
+                  $token = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+                  return @{
+                      "Authorization" = "Bearer $token"
+                      "Content-Type"  = "application/json"
+                  }
+              }
+              
+              $headers = Get-FreshToken
+              $lastTokenRefresh = Get-Date
+              $statusUrl = "$(statusUrl)"
+              
+              Write-Host "🔗 Fabric Monitoring Hub: https://app.fabric.microsoft.com/monitoringhub"
+              Write-Host ""
+              
+              $timeoutMinutes = ${{ parameters.timeout_in_minutes }}
+              $maxAttempts = [math]::Ceiling($timeoutMinutes * 2)
+              $attempt = 0
+              
+              Write-Host "⏱️ Timeout: $timeoutMinutes minutes"
+              Write-Host ""
+              
+              do {
+                  Start-Sleep -Seconds 30
+                  $attempt++
+                  
+                  if (((Get-Date) - $lastTokenRefresh).TotalSeconds -gt 900) {
+                      Write-Host "🔄 Refreshing token..."
+                      $headers = Get-FreshToken
+                      $lastTokenRefresh = Get-Date
+                  }
+                  
+                  try {
+                      $response = Invoke-RestMethod -Uri $statusUrl -Headers $headers -Method GET
+                      $status = $response.status
+                      $timestamp = Get-Date -Format "HH:mm:ss"
+                      
+                      Write-Host "[$timestamp] Status: $status"
+                      
+                      if ($status -eq "Completed") {
+                          Write-Host ""
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "✅ RESTORE COMPLETED SUCCESSFULLY!"
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "   Duration: $([math]::Round($attempt * 30 / 60, 1)) minutes"
+                          Write-Host ""
+                          Write-Host "🎉 Your data has been restored to: ${{ parameters.target_lakehouse_name }}"
+                          break
+                      }
+                      elseif ($status -eq "Failed") {
+                          Write-Host ""
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "❌ RESTORE FAILED!"
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "##vso[task.logissue type=error]Restore failed. Check Fabric Monitoring Hub."
+                          Write-Host "Response: $($response | ConvertTo-Json -Depth 5)"
+                          exit 1
+                      }
+                      elseif ($status -eq "Cancelled") {
+                          Write-Host ""
+                          Write-Host "⚠️ Restore was cancelled!"
+                          Write-Host "##vso[task.logissue type=warning]Restore cancelled."
+                          exit 1
+                      }
+                  }
+                  catch {
+                      Write-Host "⚠️ Status check error: $($_.Exception.Message)"
+                      if ($attempt -gt 5) { throw }
+                  }
+              } while ($attempt -lt $maxAttempts)
+              
+              if ($attempt -ge $maxAttempts) {
+                  Write-Host ""
+                  Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  Write-Host "❌ RESTORE TIMED OUT"
+                  Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  Write-Host "##vso[task.logissue type=error]Restore timed out after $timeoutMinutes minutes."
+                  Write-Host ""
+                  Write-Host "💡 The restore may still be running. Check Fabric Monitoring Hub."
+                  exit 1
+              }
+            azurePowerShellVersion: 'LatestVersion'

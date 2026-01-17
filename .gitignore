@@ -1,0 +1,86 @@
+# =============================================================================
+# Fabric Lakehouse Backup - Git Ignore
+# =============================================================================
+
+# Settings file (contains organization-specific values)
+settings.yml
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Logs
+*.log
+logs/
+
+# Local configuration
+local.settings.json
+*.local.yml
+*.local.yaml
+
+# Secrets and credentials (never commit these!)
+*.pem
+*.key
+secrets/
+credentials/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Azure DevOps
+.azure-pipelines-local/
+
+# Test outputs
+test-results/
+coverage/
+.coverage
+htmlcov/
