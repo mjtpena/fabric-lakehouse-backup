@@ -149,7 +149,11 @@ stages:
               azureSubscription: '${{ variables.serviceConnection }}'
               ScriptType: 'InlineScript'
               Inline: |
-                Write-Host "🔍 Finding backup notebook for Lakehouse 1..."
+                # Get lakehouse name for logging
+                $lakehouseName = [System.Environment]::GetEnvironmentVariable("LAKEHOUSE1_NAME")
+                if (-not $lakehouseName) { $lakehouseName = "Lakehouse 1" }
+                
+                Write-Host "🔍 Finding backup notebook for: $lakehouseName"
                 
                 $workspaceId = [System.Environment]::GetEnvironmentVariable("LAKEHOUSE_BACKUP_WORKSPACE_ID")
                 
@@ -176,6 +180,7 @@ stages:
                 Write-Host "✅ Found notebook: $(notebook_name) ($notebookId)"
                 Write-Host "##vso[task.setvariable variable=notebookId;]$notebookId"
                 Write-Host "##vso[task.setvariable variable=workspaceId;]$workspaceId"
+                Write-Host "##vso[task.setvariable variable=lakehouseName;]$lakehouseName"
               azurePowerShellVersion: 'LatestVersion'
 
           - task: AzurePowerShell@5
@@ -184,8 +189,9 @@ stages:
               azureSubscription: '${{ variables.serviceConnection }}'
               ScriptType: 'InlineScript'
               Inline: |
+                $lakehouseName = "$(lakehouseName)"
                 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                Write-Host "💾 Starting Backup: Lakehouse 1"
+                Write-Host "💾 Starting Backup: $lakehouseName"
                 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 
                 $workspaceId = "$(workspaceId)"
@@ -262,10 +268,11 @@ stages:
                 $headers = Get-FreshToken
                 $lastTokenRefresh = Get-Date
                 $statusUrl = "$(statusUrl)"
+                $lakehouseName = "$(lakehouseName)"
                 $maxAttempts = 180  # 90 minutes
                 $attempt = 0
                 
-                Write-Host "📊 Monitoring Lakehouse 1 backup..."
+                Write-Host "📊 Monitoring backup for: $lakehouseName"
                 
                 do {
                     Start-Sleep -Seconds 30
@@ -279,19 +286,19 @@ stages:
                     try {
                         $response = Invoke-RestMethod -Uri $statusUrl -Headers $headers -Method GET
                         $status = $response.status
-                        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Status: $status"
+                        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] [$lakehouseName] Status: $status"
                         
                         if ($status -eq "Completed") {
-                            Write-Host "✅ Lakehouse 1 backup completed!"
+                            Write-Host "✅ $lakehouseName backup completed!"
                             break
                         }
                         elseif ($status -eq "Failed") {
-                            Write-Host "❌ Lakehouse 1 backup failed!"
-                            Write-Host "##vso[task.logissue type=error]Lakehouse 1 backup failed."
+                            Write-Host "❌ $lakehouseName backup failed!"
+                            Write-Host "##vso[task.logissue type=error]$lakehouseName backup failed."
                             exit 1
                         }
                         elseif ($status -eq "Cancelled") {
-                            Write-Host "⚠️ Lakehouse 1 backup cancelled!"
+                            Write-Host "⚠️ $lakehouseName backup cancelled!"
                             exit 1
                         }
                     }
@@ -302,8 +309,8 @@ stages:
                 } while ($attempt -lt $maxAttempts)
                 
                 if ($attempt -ge $maxAttempts) {
-                    Write-Host "❌ Lakehouse 1 backup timed out!"
-                    Write-Host "##vso[task.logissue type=error]Backup timed out."
+                    Write-Host "❌ $lakehouseName backup timed out!"
+                    Write-Host "##vso[task.logissue type=error]$lakehouseName backup timed out."
                     exit 1
                 }
               azurePowerShellVersion: 'LatestVersion'
@@ -325,7 +332,9 @@ stages:
               azureSubscription: '${{ variables.serviceConnection }}'
               ScriptType: 'InlineScript'
               Inline: |
-                Write-Host "🔍 Finding backup notebook for Lakehouse 2..."
+                $lakehouseName = [System.Environment]::GetEnvironmentVariable("LAKEHOUSE2_NAME")
+                if (-not $lakehouseName) { $lakehouseName = "Lakehouse 2" }
+                Write-Host "🔍 Finding backup notebook for $lakehouseName..."
                 
                 $workspaceId = [System.Environment]::GetEnvironmentVariable("LAKEHOUSE_BACKUP_WORKSPACE_ID")
                 
@@ -352,6 +361,7 @@ stages:
                 Write-Host "✅ Found notebook: $(notebook_name) ($notebookId)"
                 Write-Host "##vso[task.setvariable variable=notebookId;]$notebookId"
                 Write-Host "##vso[task.setvariable variable=workspaceId;]$workspaceId"
+                Write-Host "##vso[task.setvariable variable=lakehouseName;]$lakehouseName"
               azurePowerShellVersion: 'LatestVersion'
 
           - task: AzurePowerShell@5
@@ -360,8 +370,9 @@ stages:
               azureSubscription: '${{ variables.serviceConnection }}'
               ScriptType: 'InlineScript'
               Inline: |
+                $lakehouseName = "$(lakehouseName)"
                 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                Write-Host "💾 Starting Backup: Lakehouse 2"
+                Write-Host "💾 Starting Backup: $lakehouseName"
                 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 
                 $workspaceId = "$(workspaceId)"
@@ -438,10 +449,11 @@ stages:
                 $headers = Get-FreshToken
                 $lastTokenRefresh = Get-Date
                 $statusUrl = "$(statusUrl)"
+                $lakehouseName = "$(lakehouseName)"
                 $maxAttempts = 180  # 90 minutes
                 $attempt = 0
                 
-                Write-Host "📊 Monitoring Lakehouse 2 backup..."
+                Write-Host "📊 Monitoring backup for: $lakehouseName"
                 
                 do {
                     Start-Sleep -Seconds 30
@@ -455,19 +467,19 @@ stages:
                     try {
                         $response = Invoke-RestMethod -Uri $statusUrl -Headers $headers -Method GET
                         $status = $response.status
-                        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Status: $status"
+                        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] [$lakehouseName] Status: $status"
                         
                         if ($status -eq "Completed") {
-                            Write-Host "✅ Lakehouse 2 backup completed!"
+                            Write-Host "✅ $lakehouseName backup completed!"
                             break
                         }
                         elseif ($status -eq "Failed") {
-                            Write-Host "❌ Lakehouse 2 backup failed!"
-                            Write-Host "##vso[task.logissue type=error]Lakehouse 2 backup failed."
+                            Write-Host "❌ $lakehouseName backup failed!"
+                            Write-Host "##vso[task.logissue type=error]$lakehouseName backup failed."
                             exit 1
                         }
                         elseif ($status -eq "Cancelled") {
-                            Write-Host "⚠️ Lakehouse 2 backup cancelled!"
+                            Write-Host "⚠️ $lakehouseName backup cancelled!"
                             exit 1
                         }
                     }
@@ -478,8 +490,8 @@ stages:
                 } while ($attempt -lt $maxAttempts)
                 
                 if ($attempt -ge $maxAttempts) {
-                    Write-Host "❌ Lakehouse 2 backup timed out!"
-                    Write-Host "##vso[task.logissue type=error]Backup timed out."
+                    Write-Host "❌ $lakehouseName backup timed out!"
+                    Write-Host "##vso[task.logissue type=error]$lakehouseName backup timed out."
                     exit 1
                 }
               azurePowerShellVersion: 'LatestVersion'
