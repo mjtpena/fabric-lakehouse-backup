@@ -73,8 +73,8 @@ Before you begin, ensure you have:
    - Go to Azure DevOps → Project Settings → Service connections
    - Create new **Azure Resource Manager** connection
    - Select **Service Principal (manual)** or **Service Principal (automatic)**
-   - Name it following the pattern: `sp-{subscription-type}-{environment}-01`
-   - Example: `sp-alz-dpora-dev-01`
+   - Name it following the pattern: `fabric-service-connection-{environment}`
+   - Example: `fabric-service-connection-dev`
 
 2. **Create Variable Groups**:
    Create variable groups for each environment (`fabric-workspaces-dev`, `fabric-workspaces-tst`, `fabric-workspaces-prd`) with these variables:
@@ -103,7 +103,8 @@ Before you begin, ensure you have:
    - Click **Import** → **Notebook**
    - Upload `nb_lakehouse_backup.Notebook/notebook-content.py`
    - Upload `nb_lakehouse_restore.Notebook/notebook-content.py`
-   - Rename them to `nb_lakehouse_backup` and `nb_lakehouse_restore`
+   - Upload `nb_lakehouse_cleanup.Notebook/notebook-content.py`
+   - Rename them to `nb_lakehouse_backup`, `nb_lakehouse_restore`, and `nb_lakehouse_cleanup`
 
 2. **Create Backup Lakehouse**:
    - In your backup workspace, create a new Lakehouse
@@ -121,6 +122,7 @@ Before you begin, ensure you have:
    - `pipeline.notebook.lakehouse.backup.yml` - Manual on-demand backup
    - `pipeline.notebook.lakehouse.backup.scheduled.yml` - Automated daily backup
    - `pipeline.notebook.lakehouse.restore.yml` - Restore from backup
+   - `pipeline.notebook.lakehouse.cleanup.yml` - Backup retention cleanup
 
 ## 📖 Usage
 
