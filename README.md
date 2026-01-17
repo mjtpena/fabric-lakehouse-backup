@@ -10,6 +10,7 @@ A complete backup and restore solution for Microsoft Fabric Lakehouses, featurin
 - **Cross-Workspace Support**: Backup and restore across different Fabric workspaces
 - **Automated Scheduling**: Schedule daily backups via Azure DevOps pipelines
 - **Flexible Restore**: Restore complete backups or selective tables/files
+- **Automatic Retention**: Cleanup old backups based on configurable retention policy
 - **Service Principal Authentication**: Secure, automated execution without user interaction
 - **Detailed Logging**: Comprehensive logging and manifest generation for audit trails
 - **Ancient Date Handling**: Pre-configured for legacy data with pre-1582 dates (e.g., Oracle EBS)
@@ -24,9 +25,12 @@ fabric-lakehouse-backup/
 │   └── notebook-content.py                      # Backup notebook (PySpark)
 ├── nb_lakehouse_restore.Notebook/
 │   └── notebook-content.py                      # Restore notebook (PySpark)
+├── nb_lakehouse_cleanup.Notebook/
+│   └── notebook-content.py                      # Cleanup/retention notebook (PySpark)
 ├── pipeline.notebook.lakehouse.backup.yml       # Manual backup pipeline
 ├── pipeline.notebook.lakehouse.backup.scheduled.yml  # Scheduled backup pipeline
-└── pipeline.notebook.lakehouse.restore.yml      # Restore pipeline
+├── pipeline.notebook.lakehouse.restore.yml      # Restore pipeline
+└── pipeline.notebook.lakehouse.cleanup.yml      # Cleanup/retention pipeline
 ```
 
 ## 🚀 Quick Start
@@ -254,13 +258,57 @@ backup_lakehouse/Files/
 2. **Azure DevOps**: Check pipeline run logs for detailed output
 3. **Backup Manifest**: Each backup includes a `_manifest` table with execution details
 
-## 📊 Backup Retention
+## 📊 Backup Retention & Cleanup
 
-The default retention period is **30 days**. To implement automatic cleanup:
+The cleanup notebook and pipeline automatically manage backup retention by deleting backups older than the specified retention period.
 
-1. Create a separate cleanup notebook
-2. Schedule it to run periodically
-3. Delete backups older than the retention period
+### Cleanup Pipeline Features
+
+- **Configurable retention period** (default: 30 days)
+- **Dry-run mode** to preview deletions before executing
+- **Pattern filtering** to clean specific lakehouses only
+- **Detailed reporting** of space reclaimed
+- **Scheduled execution** (default: weekly)
+
+### Running Cleanup Manually
+
+1. Go to Azure DevOps Pipelines
+2. Select **Lakehouse Cleanup** pipeline
+3. Click **Run pipeline**
+4. Fill in the parameters:
+   - **Environment**: `dev`, `tst`, or `prd`
+   - **Retention Days**: Number of days to keep (default: 30)
+   - **Dry Run**: `true` to preview, `false` to delete
+   - **Name Pattern**: Optional filter (e.g., `silver1_` for specific lakehouse)
+
+### Automated Scheduled Cleanup
+
+The cleanup pipeline runs automatically:
+- **Schedule**: Weekly on Sunday at 2:00 AM AEST (16:00 UTC Saturday)
+- **Default Retention**: 30 days
+
+To modify the schedule, edit the cron expression in `pipeline.notebook.lakehouse.cleanup.yml`:
+```yaml
+schedules:
+  - cron: "0 16 * * 6"  # Modify this cron expression
+```
+
+### Cleanup Notebook Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `backup_lakehouse_name` | string | Name of the backup lakehouse |
+| `backup_workspace_name` | string | Name of the backup workspace |
+| `retention_days` | integer | Days to retain backups (default: 30) |
+| `dry_run` | boolean | Preview mode - no deletions if true |
+| `name_pattern` | string | Filter backups by name pattern |
+
+### Cleanup Best Practices
+
+1. **Always run dry-run first**: Preview what will be deleted before actual cleanup
+2. **Set appropriate retention**: Balance storage costs vs recovery needs
+3. **Monitor cleanup logs**: Check for failed deletions
+4. **Stagger cleanup schedules**: Don't run cleanup during backup windows
 
 ## 🤝 Contributing
 

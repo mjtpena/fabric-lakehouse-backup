@@ -1,0 +1,356 @@
+# =============================================================================
+# Microsoft Fabric Lakehouse Backup Cleanup Pipeline (Scheduled)
+# =============================================================================
+# This pipeline manages backup retention by automatically deleting backups
+# older than the specified retention period. Run this regularly to manage
+# storage costs and keep your backup lakehouse organized.
+#
+# Default Schedule: Weekly on Sunday at 2:00 AM AEST (16:00 UTC Saturday)
+#
+# Prerequisites:
+#   1. Service Principal with Fabric API permissions
+#   2. Azure DevOps Service Connection configured
+#   3. Variable groups for each environment with workspace IDs
+#   4. Cleanup notebook deployed to your Fabric workspace
+#
+# See README.md for detailed setup instructions.
+# =============================================================================
+
+trigger: none
+
+# Schedule configuration
+# Run weekly to clean up old backups
+schedules:
+  - cron: "0 16 * * 6"  # Weekly on Saturday 16:00 UTC (Sunday 2:00 AM AEST)
+    displayName: Weekly Backup Cleanup
+    branches:
+      include:
+        - main
+    always: true
+
+# ---------- Pipeline Parameters ----------
+parameters:
+  - name: environment
+    displayName: Target Environment
+    type: string
+    values:
+      - dev
+      - tst
+      - prd
+    default: prd
+
+  - name: agentType
+    displayName: Agent Type
+    type: string
+    values:
+      - self-hosted
+      - ms-hosted
+    default: ms-hosted
+
+  - name: retention_days
+    displayName: Retention Period (Days)
+    type: number
+    default: 30
+
+  - name: dry_run
+    displayName: Dry Run (Preview Only)
+    type: string
+    values:
+      - "true"
+      - "false"
+    default: "false"
+    # Set to "true" to preview what would be deleted without actually deleting
+
+  - name: name_pattern
+    displayName: Backup Name Pattern (Optional)
+    type: string
+    default: " "
+    # Example: "silver1_" to only clean silver1 backups
+
+  - name: timeout_in_minutes
+    displayName: Timeout in Minutes
+    type: number
+    default: 60
+
+# ---------- Variables ----------
+variables:
+  # Import workspace ID variable groups based on selected environment
+  - ${{ if eq(parameters.environment, 'dev') }}:
+    - group: 'fabric-workspaces-dev'
+  - ${{ elseif eq(parameters.environment, 'tst') }}:
+    - group: 'fabric-workspaces-tst'
+  - ${{ else }}:
+    - group: 'fabric-workspaces-prd'
+
+  # Service connection name
+  - name: serviceConnection
+    value: "fabric-service-connection-${{ parameters.environment }}"
+
+  # Agent pool for self-hosted agents
+  - name: selfHostedAgentPoolName
+    value: "default"
+
+  # Notebook name
+  - name: notebook_name
+    value: "nb_lakehouse_cleanup"
+
+  # Environment display name
+  - name: environment_name
+    value: "${{ upper(parameters.environment) }}"
+
+  # Backup lakehouse naming
+  - name: backup_lakehouse_name
+    value: "lh_${{ lower(parameters.environment) }}_backup"
+
+  - name: backup_workspace_name
+    value: "ws-${{ lower(parameters.environment) }}-backup"
+
+# ---------- Stages ----------
+stages:
+  - stage: BackupCleanup
+    displayName: "Backup Cleanup - ${{ parameters.environment }}"
+    
+    ${{ if eq(parameters.agentType, 'ms-hosted') }}:
+      pool:
+        vmImage: ubuntu-latest
+    ${{ else }}:
+      pool: $(selfHostedAgentPoolName)
+    
+    jobs:
+      - job: cleanup_backups
+        displayName: Cleanup Old Backups
+        timeoutInMinutes: ${{ parameters.timeout_in_minutes }}
+
+        steps:
+        # =====================================================================
+        # Step 1: Find the cleanup notebook
+        # =====================================================================
+        - task: AzurePowerShell@5
+          displayName: 'Find Cleanup Notebook'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "🔍 STEP 1: Finding Cleanup Notebook"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              $workspaceId = [System.Environment]::GetEnvironmentVariable("LAKEHOUSE_BACKUP_WORKSPACE_ID")
+              
+              if (-not $workspaceId) {
+                  Write-Host "❌ ERROR: LAKEHOUSE_BACKUP_WORKSPACE_ID not found"
+                  Write-Host ""
+                  Write-Host "💡 Make sure your variable group contains:"
+                  Write-Host "   - lakehouse_backup_workspace_id: <your-workspace-guid>"
+                  exit 1
+              }
+              
+              Write-Host "✅ Workspace ID: $workspaceId"
+              
+              $bearerToken = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+              $headers = @{
+                "Authorization" = "Bearer $bearerToken"
+                "Content-Type"  = "application/json"
+              }
+              
+              $apiUrl = "https://api.fabric.microsoft.com/v1/workspaces/$workspaceId/notebooks"
+              $list = Invoke-RestMethod -Uri $apiUrl -Headers $headers -Method GET
+              $notebookId = ($list.value | Where-Object {$_.displayName -eq "$(notebook_name)"}).id
+              
+              if (-not $notebookId) {
+                  Write-Host "❌ ERROR: Notebook '$(notebook_name)' not found"
+                  Write-Host ""
+                  Write-Host "📋 Available notebooks:"
+                  $list.value | ForEach-Object { Write-Host "   - $($_.displayName)" }
+                  Write-Host ""
+                  Write-Host "💡 Make sure to import the cleanup notebook to your workspace"
+                  exit 1
+              }
+              
+              Write-Host "✅ Found notebook: $(notebook_name)"
+              Write-Host "   ID: $notebookId"
+              
+              Write-Host "##vso[task.setvariable variable=notebookId;]$notebookId"
+              Write-Host "##vso[task.setvariable variable=workspaceId;]$workspaceId"
+            azurePowerShellVersion: 'LatestVersion'
+
+        # =====================================================================
+        # Step 2: Execute the cleanup notebook
+        # =====================================================================
+        - task: AzurePowerShell@5
+          displayName: 'Execute Cleanup Notebook'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "🧹 STEP 2: Executing Cleanup Notebook"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              $workspaceId = "$(workspaceId)"
+              
+              $fabricToken = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+              $headers = @{
+                  "Authorization" = "Bearer $fabricToken"
+                  "Content-Type" = "application/json"
+              }
+              
+              # Get parameters
+              $backupLakehouseName = "$(backup_lakehouse_name)"
+              $backupWorkspaceName = "$(backup_workspace_name)"
+              $retentionDays = ${{ parameters.retention_days }}
+              $dryRun = "${{ parameters.dry_run }}"
+              $namePattern = "${{ parameters.name_pattern }}".Trim()
+              
+              # Handle empty pattern
+              if ($namePattern -eq " ") {
+                  $namePattern = ""
+              }
+              
+              Write-Host "📋 Cleanup Configuration:"
+              Write-Host "   Environment:       $(environment_name)"
+              Write-Host "   Backup Lakehouse:  $backupLakehouseName"
+              Write-Host "   Backup Workspace:  $backupWorkspaceName"
+              Write-Host "   Retention Days:    $retentionDays"
+              Write-Host "   Dry Run:           $dryRun"
+              Write-Host "   Name Pattern:      $(if ($namePattern) { $namePattern } else { '(all backups)' })"
+              Write-Host ""
+              
+              if ($dryRun -eq "true") {
+                  Write-Host "⚠️  DRY RUN MODE: No backups will be deleted"
+                  Write-Host ""
+              }
+              
+              # Build notebook parameters
+              $parametersDict = @{
+                  "backup_lakehouse_name" = @{ "value" = $backupLakehouseName; "type" = "string" }
+                  "backup_workspace_name" = @{ "value" = $backupWorkspaceName; "type" = "string" }
+                  "retention_days" = @{ "value" = $retentionDays; "type" = "int" }
+                  "dry_run" = @{ "value" = [bool]::Parse($dryRun); "type" = "bool" }
+                  "name_pattern" = @{ "value" = $namePattern; "type" = "string" }
+              }
+              
+              $body = @{
+                  "executionData" = @{ "parameters" = $parametersDict }
+              } | ConvertTo-Json -Depth 4
+              
+              $startUrl = "https://api.fabric.microsoft.com/v1/workspaces/$workspaceId/items/$(notebookId)/jobs/instances?jobType=RunNotebook"
+              
+              try {
+                  $response = Invoke-RestMethod -Uri $startUrl -Headers $headers -Method POST -Body $body -ResponseHeadersVariable responseHeaders
+                  $statusUrl = $responseHeaders.location[0]
+                  $jobInstanceId = ($statusUrl -split "/")[-1]
+                  
+                  Write-Host "✅ Cleanup started successfully!"
+                  Write-Host "   Job ID: $jobInstanceId"
+                  Write-Host ""
+                  Write-Host "🔗 Monitor in Fabric: https://app.fabric.microsoft.com/monitoringhub"
+                  
+                  Write-Host "##vso[task.setvariable variable=statusUrl;]$statusUrl"
+                  Write-Host "##vso[task.setvariable variable=jobInstanceId;]$jobInstanceId"
+              }
+              catch {
+                  Write-Host "❌ Failed to start cleanup: $($_.Exception.Message)"
+                  exit 1
+              }
+            azurePowerShellVersion: 'LatestVersion'
+
+        # =====================================================================
+        # Step 3: Monitor cleanup execution
+        # =====================================================================
+        - task: AzurePowerShell@5
+          displayName: 'Monitor Cleanup Execution'
+          inputs:
+            azureSubscription: '${{ variables.serviceConnection }}'
+            ScriptType: 'InlineScript'
+            Inline: |
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              Write-Host "📊 STEP 3: Monitoring Cleanup Execution"
+              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              
+              function Get-FreshToken {
+                  $token = (Get-AzAccessToken -AsSecureString -ResourceUrl "https://api.fabric.microsoft.com").Token | ConvertFrom-SecureString -AsPlainText
+                  return @{
+                      "Authorization" = "Bearer $token"
+                      "Content-Type"  = "application/json"
+                  }
+              }
+              
+              $headers = Get-FreshToken
+              $lastTokenRefresh = Get-Date
+              $statusUrl = "$(statusUrl)"
+              
+              Write-Host "🔗 Fabric Monitoring Hub: https://app.fabric.microsoft.com/monitoringhub"
+              Write-Host ""
+              
+              $timeoutMinutes = ${{ parameters.timeout_in_minutes }}
+              $maxAttempts = [math]::Ceiling($timeoutMinutes * 2)
+              $attempt = 0
+              
+              Write-Host "⏱️ Timeout: $timeoutMinutes minutes"
+              Write-Host ""
+              
+              do {
+                  Start-Sleep -Seconds 30
+                  $attempt++
+                  
+                  if (((Get-Date) - $lastTokenRefresh).TotalSeconds -gt 900) {
+                      Write-Host "🔄 Refreshing token..."
+                      $headers = Get-FreshToken
+                      $lastTokenRefresh = Get-Date
+                  }
+                  
+                  try {
+                      $response = Invoke-RestMethod -Uri $statusUrl -Headers $headers -Method GET
+                      $status = $response.status
+                      $timestamp = Get-Date -Format "HH:mm:ss"
+                      
+                      Write-Host "[$timestamp] Status: $status"
+                      
+                      if ($status -eq "Completed") {
+                          Write-Host ""
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "✅ CLEANUP COMPLETED SUCCESSFULLY!"
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "   Duration: $([math]::Round($attempt * 30 / 60, 1)) minutes"
+                          
+                          if ("${{ parameters.dry_run }}" -eq "true") {
+                              Write-Host ""
+                              Write-Host "ℹ️  This was a DRY RUN - no backups were deleted"
+                              Write-Host "   Check the notebook output in Fabric for details"
+                          }
+                          break
+                      }
+                      elseif ($status -eq "Failed") {
+                          Write-Host ""
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "❌ CLEANUP FAILED!"
+                          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                          Write-Host "##vso[task.logissue type=error]Cleanup failed. Check Fabric Monitoring Hub."
+                          Write-Host "Response: $($response | ConvertTo-Json -Depth 5)"
+                          exit 1
+                      }
+                      elseif ($status -eq "Cancelled") {
+                          Write-Host ""
+                          Write-Host "⚠️ Cleanup was cancelled!"
+                          Write-Host "##vso[task.logissue type=warning]Cleanup cancelled."
+                          exit 1
+                      }
+                  }
+                  catch {
+                      Write-Host "⚠️ Status check error: $($_.Exception.Message)"
+                      if ($attempt -gt 5) { throw }
+                  }
+              } while ($attempt -lt $maxAttempts)
+              
+              if ($attempt -ge $maxAttempts) {
+                  Write-Host ""
+                  Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  Write-Host "❌ CLEANUP TIMED OUT"
+                  Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  Write-Host "##vso[task.logissue type=error]Cleanup timed out after $timeoutMinutes minutes."
+                  Write-Host ""
+                  Write-Host "💡 The cleanup may still be running. Check Fabric Monitoring Hub."
+                  exit 1
+              }
+            azurePowerShellVersion: 'LatestVersion'
