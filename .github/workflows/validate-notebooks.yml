@@ -7,8 +7,9 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - '*.ipynb'
-      - 'scripts/*.py'
+      - '**/*.Notebook/**'
+      - '*.yml'
+      - '*.md'
 
 jobs:
   validate:
@@ -25,44 +26,47 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install nbformat jsonschema pyspark pandas
+        pip install pyflakes
     
-    - name: Validate notebook structure
+    - name: Validate Fabric notebook Python files
       run: |
         python -c "
-        import nbformat
+        import ast
         import sys
         import os
         
-        notebooks = ['Fabric_Lakehouse_Backup.ipynb', 'Fabric_Lakehouse_Restore.ipynb']
+        # Find all Fabric notebook Python files
+        notebook_dirs = [
+            'nb_lakehouse_backup.Notebook',
+            'nb_lakehouse_cleanup.Notebook',
+            'nb_lakehouse_restore.Notebook'
+        ]
         
-        for notebook in notebooks:
-            if os.path.exists(notebook):
+        errors_found = False
+        
+        for notebook_dir in notebook_dirs:
+            notebook_file = os.path.join(notebook_dir, 'notebook-content.py')
+            if os.path.exists(notebook_file):
                 try:
-                    with open(notebook, 'r') as f:
-                        nb = nbformat.read(f, as_version=4)
-                    print(f'✅ {notebook}: Valid notebook structure')
-                    
-                    # Check for required parameters
-                    first_cell = nb.cells[0].source if nb.cells else ''
-                    if 'Parameters' in first_cell or 'parameters' in first_cell:
-                        print(f'✅ {notebook}: Contains parameter cell')
-                    else:
-                        print(f'⚠️  {notebook}: No parameter cell found')
-                        
+                    with open(notebook_file, 'r') as f:
+                        content = f.read()
+                    # Parse the Python file to check for syntax errors
+                    ast.parse(content)
+                    print(f'✅ {notebook_file}: Valid Python syntax')
+                except SyntaxError as e:
+                    print(f'❌ {notebook_file}: Syntax error - {str(e)}')
+                    errors_found = True
                 except Exception as e:
-                    print(f'❌ {notebook}: Invalid - {str(e)}')
-                    sys.exit(1)
+                    print(f'❌ {notebook_file}: Error - {str(e)}')
+                    errors_found = True
             else:
-                print(f'⚠️  {notebook}: File not found')
+                print(f'⚠️  {notebook_file}: File not found')
+        
+        if errors_found:
+            sys.exit(1)
         
         print('All notebook validations completed')
         "
-    
-    - name: Validate Python scripts
-      run: |
-        python -m py_compile scripts/*.py
-        echo "✅ All Python scripts compile successfully"
     
     - name: Check documentation links
       run: |
@@ -73,6 +77,8 @@ jobs:
         # Check for broken relative links in markdown files
         md_files = []
         for root, dirs, files in os.walk('.'):
+            # Skip hidden directories
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
             for file in files:
                 if file.endswith('.md'):
                     md_files.append(os.path.join(root, file))
@@ -83,10 +89,14 @@ jobs:
                 # Find markdown links
                 links = re.findall(r'\[.*?\]\((.*?)\)', content)
                 for link in links:
-                    if link.startswith('./') or not link.startswith('http'):
-                        # Check if relative file exists
-                        link_path = os.path.join(os.path.dirname(md_file), link)
-                        if not os.path.exists(link_path):
+                    # Skip URLs and anchors
+                    if link.startswith('http') or link.startswith('#'):
+                        continue
+                    # Handle links with anchors
+                    link_path = link.split('#')[0]
+                    if link_path:
+                        full_path = os.path.join(os.path.dirname(md_file), link_path)
+                        if not os.path.exists(full_path):
                             print(f'⚠️  Broken link in {md_file}: {link}')
         
         print('✅ Documentation link check completed')
