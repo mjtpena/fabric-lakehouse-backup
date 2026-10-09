@@ -1,0 +1,11 @@
+# Lint configuration for the Fabric notebooks (notebook-content.py) and tests.
+# CI runs: ruff check .
+# Notebooks must run on Fabric Runtime 1.3 (Python 3.11) and Runtime 2.0 (Python 3.13).
+target-version = "py311"
+
+# Globals that the Fabric notebook session provides without an import
+builtins = ["spark", "sc", "display"]
+
+[lint]
+# F: pyflakes (unused imports, undefined names, ...), E9: syntax errors, E722: bare except
+select = ["F", "E9", "E722"]
