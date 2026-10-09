@@ -23,6 +23,8 @@
 #   - Dry-run mode to preview deletions
 #   - Detailed logging and reporting
 #   - Support for selective cleanup by lakehouse name pattern
+#   - Never deletes a folder whose _manifest is missing or unreadable
+#     (logged as "unknown, skipped"; delete such folders by hand)
 # =============================================================================
 
 # Parameters - Configure these values or override when scheduling
@@ -52,39 +54,48 @@ name_pattern = ""  # Optional: Only clean backups matching this pattern (e.g., "
 # Cell 1: Import Libraries and Initialize
 # =============================================================================
 
-import os
 import json
 import datetime
-import re
-from pyspark.sql.functions import lit, col, current_timestamp
-from pyspark.sql.types import StructType, StructField, StringType, TimestampType, IntegerType, LongType, BooleanType
 import notebookutils
 
 # Initialize global variables
 log_entries = []
-cleanup_start_time = datetime.datetime.now()
+cleanup_start_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)  # UTC, like backup folder names
 
 print("=" * 60)
 print("🧹 MICROSOFT FABRIC LAKEHOUSE BACKUP CLEANUP")
 print("=" * 60)
 print(f"📅 Started at: {cleanup_start_time}")
-print(f"📚 Libraries imported successfully")
+print("📚 Libraries imported successfully")
 
 # CELL ********************
 
 # =============================================================================
 # Cell 2: Helper Functions
 # =============================================================================
+# Pure helpers: no Spark or notebookutils calls. Unit tested in tests/.
+import datetime
+import re
+
+
+def utc_now():
+    """Current UTC time as a naive datetime (backup folder timestamps are UTC)"""
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+def onelake_lakehouse_path(workspace_name, lakehouse_name):
+    """ABFS path of a lakehouse item in OneLake"""
+    return f"abfss://{workspace_name.strip()}@onelake.dfs.fabric.microsoft.com/{lakehouse_name.strip()}.Lakehouse"
 
 def log_message(message, level="INFO"):
     """Log a message with timestamp and level"""
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = utc_now().strftime("%Y-%m-%d %H:%M:%S")
     emoji_map = {
         "INFO": "ℹ️",
         "WARNING": "⚠️",
         "ERROR": "❌",
         "SUCCESS": "✅",
-        "DELETE": "🗑️"
+        "DELETE": "🗑️",
+        "SKIP": "⏭️"
     }
     emoji = emoji_map.get(level, "📝")
     print(f"[{timestamp}] {emoji} [{level}] {message}")
@@ -117,9 +128,7 @@ def validate_parameters():
 
 def get_backup_base_path():
     """Construct the base path for the backup lakehouse Files directory"""
-    workspace_name = backup_workspace_name.strip()
-    lakehouse_name = backup_lakehouse_name.strip()
-    return f"abfss://{workspace_name}@onelake.dfs.fabric.microsoft.com/{lakehouse_name}.Lakehouse/Files"
+    return f"{onelake_lakehouse_path(backup_workspace_name, backup_lakehouse_name)}/Files"
 
 def parse_backup_timestamp(backup_name):
     """
@@ -179,12 +188,13 @@ def discover_backups(base_path):
                     "age_days": None,
                     "size_bytes": 0,
                     "is_expired": False,
-                    "matches_pattern": True
+                    "matches_pattern": True,
+                    "manifest_readable": None  # Checked only for backups that would be deleted
                 }
                 
                 # Calculate age if timestamp was parsed
                 if backup_timestamp:
-                    age = datetime.datetime.now() - backup_timestamp
+                    age = utc_now() - backup_timestamp
                     backup_info["age_days"] = age.days
                     backup_info["is_expired"] = age.days > retention_days
                 
@@ -195,7 +205,7 @@ def discover_backups(base_path):
                 # Try to get size (this can be slow for large backups)
                 try:
                     backup_info["size_bytes"] = get_folder_size(item.path)
-                except:
+                except Exception:
                     backup_info["size_bytes"] = 0
                 
                 backups.append(backup_info)
@@ -221,9 +231,16 @@ def get_folder_size(folder_path):
                 total_size += get_folder_size(item.path)
             else:
                 total_size += item.size if hasattr(item, 'size') else 0
-    except:
+    except Exception:
         pass
     return total_size
+
+def manifest_is_readable(backup_folder_path):
+    """True if the backup folder has a _manifest Delta table that can be read and has a row"""
+    try:
+        return len(spark.read.format("delta").load(f"{backup_folder_path}/_manifest").limit(1).collect()) == 1
+    except Exception:
+        return False
 
 print("✅ Backup discovery functions defined successfully")
 
@@ -247,8 +264,10 @@ def analyze_backups(backups):
         "expired_backups": 0,
         "retained_backups": 0,
         "pattern_matched": 0,
+        "unknown_skipped": 0,
         "to_delete": [],
         "to_retain": [],
+        "to_skip_unknown": [],
         "total_size_to_delete": 0,
         "total_size_to_retain": 0
     }
@@ -273,6 +292,14 @@ def analyze_backups(backups):
         
         # Check if expired
         if backup["is_expired"]:
+            # Guard: only delete folders that are recognisably backups. A folder without a
+            # readable _manifest may be an in-progress backup or something else entirely.
+            backup["manifest_readable"] = manifest_is_readable(backup["path"])
+            if not backup["manifest_readable"]:
+                analysis["unknown_skipped"] += 1
+                analysis["to_skip_unknown"].append(backup)
+                log_message(f"Backup {backup['name']}: manifest missing or unreadable - unknown, skipped", "SKIP")
+                continue
             analysis["expired_backups"] += 1
             analysis["to_delete"].append(backup)
             analysis["total_size_to_delete"] += backup["size_bytes"]
@@ -289,17 +316,18 @@ def print_analysis_report(analysis):
     print("=" * 60)
     print("📊 BACKUP ANALYSIS REPORT")
     print("=" * 60)
-    print(f"")
+    print("")
     print(f"📁 Total backup folders found:     {analysis['total_backups']}")
     print(f"✅ Valid backups (with timestamp): {analysis['valid_backups']}")
     print(f"⚠️  Invalid backups (no timestamp): {analysis['invalid_backups']}")
-    print(f"")
+    print("")
     print(f"📅 Retention period:               {retention_days} days")
     print(f"🔍 Name pattern filter:            {name_pattern if name_pattern else '(none)'}")
-    print(f"")
+    print("")
     print(f"🗑️  Backups to DELETE:              {analysis['expired_backups']}")
     print(f"💾 Backups to RETAIN:              {analysis['retained_backups']}")
-    print(f"")
+    print(f"⏭️  Unknown, skipped (no manifest):  {analysis['unknown_skipped']}")
+    print("")
     print(f"📦 Storage to free:                {format_size(analysis['total_size_to_delete'])}")
     print(f"📦 Storage to retain:              {format_size(analysis['total_size_to_retain'])}")
     print("=" * 60)
@@ -316,6 +344,14 @@ def print_analysis_report(analysis):
             print(f"     Age: {age_str} | Size: {size_str}")
         print("")
     
+    # List expired folders that were skipped because their manifest is missing or unreadable
+    if analysis["to_skip_unknown"]:
+        print("⏭️  UNKNOWN, SKIPPED (manifest missing or unreadable - delete by hand if not needed):")
+        print("-" * 60)
+        for backup in sorted(analysis["to_skip_unknown"], key=lambda x: x["timestamp"]):
+            print(f"   • {backup['name']} ({backup['age_days']} days old, {format_size(backup['size_bytes'])})")
+        print("")
+
     # List backups to retain (limited to 10 most recent)
     if analysis["to_retain"]:
         print("💾 BACKUPS TO RETAIN (most recent 10):")
@@ -411,11 +447,11 @@ def print_cleanup_results(results):
     print("=" * 60)
     print("📋 CLEANUP RESULTS")
     print("=" * 60)
-    print(f"")
+    print("")
     print(f"🎯 Backups attempted:  {results['attempted']}")
     print(f"✅ Successfully deleted: {results['succeeded']}")
     print(f"❌ Failed to delete:    {results['failed']}")
-    print(f"")
+    print("")
     print(f"💾 Space freed:        {format_size(results['space_freed'])}")
     print("")
     
@@ -445,14 +481,14 @@ def main():
         log_message("=" * 50, "INFO")
         validate_parameters()
         
-        print(f"")
-        print(f"📋 Configuration:")
+        print("")
+        print("📋 Configuration:")
         print(f"   Backup Lakehouse: {backup_lakehouse_name}")
         print(f"   Backup Workspace: {backup_workspace_name}")
         print(f"   Retention Days:   {retention_days}")
         print(f"   Dry Run:          {dry_run}")
         print(f"   Name Pattern:     {name_pattern if name_pattern else '(all backups)'}")
-        print(f"")
+        print("")
         
         # Step 2: Discover backups
         log_message("=" * 50, "INFO")
@@ -485,7 +521,7 @@ def main():
             print_cleanup_results(results)
         
         # Final summary
-        cleanup_end_time = datetime.datetime.now()
+        cleanup_end_time = utc_now()
         duration = cleanup_end_time - cleanup_start_time
         
         print("")
@@ -502,6 +538,7 @@ def main():
             "dry_run": dry_run,
             "total_backups": analysis["total_backups"],
             "expired_backups": analysis["expired_backups"],
+            "unknown_skipped": analysis["unknown_skipped"],
             "deleted_backups": results["succeeded"] if not dry_run else 0,
             "space_freed_bytes": results["space_freed"] if not dry_run else 0,
             "failed_deletions": results["failed"] if not dry_run else 0
