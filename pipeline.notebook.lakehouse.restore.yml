@@ -54,6 +54,13 @@ parameters:
     default: " "
     # Example: wsp_transform_dev
 
+  - name: target_schema
+    displayName: Target Schema (optional, schema-enabled targets only)
+    type: string
+    default: " "
+    # Leave blank to keep each table's schema (tables from non-schema backups go to dbo).
+    # Set to restore every table into this schema, e.g. restored_2025_11_10
+
   - name: restore_tables
     displayName: Restore Tables
     type: string
@@ -217,6 +224,8 @@ stages:
               $backupPath = "${{ parameters.backup_path }}".Trim()
               $targetLakehouseName = "${{ parameters.target_lakehouse_name }}".Trim()
               $targetWorkspaceName = "${{ parameters.target_workspace_name }}".Trim()
+              $targetSchema = "${{ parameters.target_schema }}".Trim()
+              $targetSchemaDisplay = if ($targetSchema) { $targetSchema } else { "(keep source schema / dbo)" }
               $restoreTables = "${{ parameters.restore_tables }}"
               $restoreFiles = "${{ parameters.restore_files }}"
               $overwriteExisting = "${{ parameters.overwrite_existing }}"
@@ -243,6 +252,7 @@ stages:
               Write-Host "   Backup Path: $backupPath"
               Write-Host "   Target Lakehouse: $targetLakehouseName"
               Write-Host "   Target Workspace: $targetWorkspaceName"
+              Write-Host "   Target Schema: $targetSchemaDisplay"
               Write-Host "   Restore Tables: $restoreTables"
               Write-Host "   Restore Files: $restoreFiles"
               Write-Host "   Overwrite Existing: $overwriteExisting"
@@ -263,6 +273,11 @@ stages:
                   "restore_tables" = @{ "value" = [bool]::Parse($restoreTables); "type" = "bool" }
                   "restore_files" = @{ "value" = [bool]::Parse($restoreFiles); "type" = "bool" }
                   "overwrite_existing" = @{ "value" = [bool]::Parse($overwriteExisting); "type" = "bool" }
+              }
+
+              # Optional parameter: only sent when set, so the notebook default (empty) applies otherwise
+              if ($targetSchema) {
+                  $parametersDict["target_schema"] = @{ "value" = $targetSchema; "type" = "string" }
               }
               
               $body = @{

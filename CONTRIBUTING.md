@@ -53,7 +53,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
    git checkout -b feature/your-feature-name
    ```
 
-3. Make your changes and test them in your Fabric environment
+3. Make your changes, run the local checks (see [Testing](#testing)) and test them in your Fabric environment
 
 4. Commit your changes:
    ```bash
@@ -75,7 +75,12 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 - Use meaningful variable and function names
 - Add docstrings to all functions
 - Include logging for important operations
-- Handle exceptions gracefully with informative error messages
+- Handle exceptions gracefully with informative error messages, and use `except Exception:` rather than a bare `except:`
+- Keep notebooks runnable on Fabric Runtime 1.3 (Python 3.11) and Runtime 2.0 (Python 3.13)
+- Use `notebookutils`, not `mssparkutils`
+- Write Delta tables from Python data with an explicit schema; don't rely on Spark inferring a schema from dicts (Spark 4 merges map value types and rejects mixed types)
+- Put logic that doesn't need Spark or `notebookutils` (path building, discovery decisions, restore planning) in the notebook's `# Pure helpers: no Spark or notebookutils calls.` cell, and pass I/O in as functions, so it can be unit tested
+- Don't change the Fabric cell markers (`# CELL ********************`, `# PARAMETERS CELL ********************`, `# METADATA ********************`); the parameters cell must stay the first code cell, tagged `"parameters"`
 
 Example:
 ```python
@@ -147,13 +152,54 @@ Examples:
 
 ## Testing
 
-Before submitting a PR:
+### Local checks (run these before every PR)
 
-1. **Test backup functionality** with your own lakehouse
-2. **Test restore functionality** to a new or existing lakehouse
-3. **Verify pipeline execution** in Azure DevOps
-4. **Check logging** for appropriate messages
-5. **Validate error handling** with intentionally invalid inputs
+The [Validate Notebooks](.github/workflows/validate-notebooks.yml) workflow runs the same checks on every pull request.
+
+```bash
+# Syntax on the Fabric runtime Python versions (3.11 for Runtime 1.3, 3.13 for Runtime 2.0)
+for nb in nb_lakehouse_*.Notebook; do python3.13 -m py_compile "$nb/notebook-content.py"; done
+
+# Lint: unused imports, undefined names, bare except (settings in ruff.toml)
+pip install ruff==0.16.8
+ruff check .
+
+# Notebook structure and pure-helper unit tests (standard library only)
+python -m unittest discover -s tests -v
+```
+
+### End-to-end tests on local Spark
+
+`tests/test_spark_matrix.py` runs all three notebooks, cell by cell, on open-source Spark and Delta Lake. A local folder stands in for OneLake and `tests/spark_harness.py` stands in for `notebookutils`. The tests cover backup and restore across non-schema and schema-enabled sources and targets, backups in the original (v1) layout, `target_schema`, overwrite behaviour, partial backups and the cleanup manifest guard. They are skipped when PySpark isn't installed. The workflow runs them on two lanes that match the Fabric runtimes:
+
+```bash
+# Like Fabric Runtime 2.0 (needs Java 17 or 21)
+python3.13 -m venv .venv && . .venv/bin/activate
+pip install "pyspark==4.1.*" "delta-spark==4.2.*"
+cd tests && REQUIRE_SPARK_TESTS=1 python -m unittest -v test_spark_matrix
+
+# Like Fabric Runtime 1.3: Python 3.11 with "pyspark==3.5.*" "delta-spark==3.2.*"
+```
+
+The first run downloads the Delta Lake jars from Maven Central.
+
+### Testing in a Fabric workspace
+
+The local tests don't exercise OneLake, Fabric's `notebookutils`, the lakehouse catalog or service principal permissions. Before releasing a change to the notebooks, run it in a Fabric workspace on the runtimes you support (1.3 and 2.0):
+
+1. **Backup** a non-schema lakehouse and a schema-enabled lakehouse (with tables in `dbo` and one other schema, a partitioned table, and some files). Check `_manifest` (`layout_version = 2`, `schema_enabled`, `status = success`) and the `tables/` layout.
+2. **Restore** each combination below into a new lakehouse and check that the tables appear in the Lakehouse explorer under the expected schema, with the expected row counts:
+
+   | Backup | Non-schema target | Schema-enabled target |
+   |---|---|---|
+   | v1 backup of a non-schema source (made with the original notebook) | `Tables/<table>` | `Tables/dbo/<table>`; also try `target_schema` |
+   | v2 backup of a non-schema source | `Tables/<table>` | `Tables/dbo/<table>` |
+   | v2 backup of a schema-enabled source | Fails before writing if it has several schemas; flattens a single schema | `Tables/<schema>/<table>`; also try `target_schema` |
+
+   (The original notebook couldn't back up schema-enabled lakehouses, so there is no v1 schema-enabled case.)
+3. **Restore into a new schema** with `target_schema` and confirm whether Fabric lists the new schema without running `CREATE SCHEMA`.
+4. **Run the pipelines** from Azure DevOps with the service principal, including a restore with the Target Schema parameter, and confirm that a deliberately failing run (for example a wrong lakehouse name) fails the pipeline.
+5. **Cleanup** with `dry_run = true`, then `false`, on a backup lakehouse that holds an expired backup without `_manifest`; it must be reported as "unknown, skipped" and kept.
 
 ## Questions?
 
