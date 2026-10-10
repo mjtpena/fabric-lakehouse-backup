@@ -414,73 +414,44 @@ print("✅ Table discovery functions defined successfully")
 # CELL ********************
 
 def discover_files(files_path):
-    """Discover all files in the Files directory"""
-    try:
-        log_message("🔍 Discovering files...", "INFO")
+    """
+    Discover all files under the Files directory (names starting with '_' or '.' are skipped).
 
+    Returns (files_info, errors). A folder that can't be listed is reported in errors, so the
+    backup counts it as a failure instead of finishing with a silently incomplete file list.
+    """
+    log_message("🔍 Discovering files...", "INFO")
+    files_info = []
+    errors = []
+
+    def process_path(path, relative_base=""):
         try:
-            files_info = []
-
-            def process_path(path, relative_base=""):
-                try:
-                    items = notebookutils.fs.ls(path)
-                    for item in items:
-                        if not item.name.startswith('_') and not item.name.startswith('.'):
-                            relative_path = f"{relative_base}/{item.name.rstrip('/')}".lstrip('/')
-                            file_info = {
-                                "name": item.name.rstrip('/'),
-                                "path": item.path,
-                                "relative_path": relative_path,
-                                "is_directory": item.isDir,
-                                "size": item.size if hasattr(item, 'size') else 0,
-                                "type": "directory" if item.isDir else get_file_type(item.name)
-                            }
-                            files_info.append(file_info)
-
-                            if item.isDir:
-                                process_path(item.path, relative_path)
-                except Exception as e:
-                    log_message(f"Error processing path {path}: {str(e)}", "WARNING")
-
-            process_path(files_path)
-            log_message(f"Found {len(files_info)} files/directories", "INFO")
-            return files_info
-
+            items = notebookutils.fs.ls(path)
         except Exception as e:
-            log_message(f"File discovery using notebookutils failed: {str(e)}", "WARNING")
+            log_message(f"❌ Cannot list folder {path}: {str(e)}", "ERROR")
+            errors.append({"path": path, "error": str(e)})
+            return
 
-        # Fallback to Spark
-        try:
-            files_df = spark.read.format("binaryFile").option("recursiveFileLookup", "true").load(files_path + "/*")
-            file_rows = files_df.select("path", "length", "modificationTime").collect()
+        for item in items:
+            if not item.name.startswith('_') and not item.name.startswith('.'):
+                relative_path = f"{relative_base}/{item.name.rstrip('/')}".lstrip('/')
+                file_info = {
+                    "name": item.name.rstrip('/'),
+                    "path": item.path,
+                    "relative_path": relative_path,
+                    "is_directory": item.isDir,
+                    "size": item.size if hasattr(item, 'size') else 0,
+                    "type": "directory" if item.isDir else get_file_type(item.name)
+                }
+                files_info.append(file_info)
 
-            files_info = []
-            for row in file_rows:
-                file_path = row.path
-                if '/Files/' in file_path:
-                    relative_path = file_path.split('/Files/')[1]
-                    file_name = relative_path.split('/')[-1]
+                if item.isDir:
+                    process_path(item.path, relative_path)
 
-                    files_info.append({
-                        "name": file_name,
-                        "path": file_path,
-                        "relative_path": relative_path,
-                        "is_directory": False,
-                        "size": row.length,
-                        "type": get_file_type(file_name),
-                        "modification_time": row.modificationTime
-                    })
-
-            log_message(f"Found {len(files_info)} files using Spark", "INFO")
-            return files_info
-
-        except Exception as e:
-            log_message(f"Spark file discovery failed: {str(e)}", "ERROR")
-            return []
-
-    except Exception as e:
-        log_message(f"File discovery failed: {str(e)}", "ERROR")
-        return []
+    process_path(files_path)
+    errors_text = f", {len(errors)} folders could not be listed" if errors else ""
+    log_message(f"Found {len(files_info)} files/directories{errors_text}", "INFO")
+    return files_info, errors
 
 print("✅ File discovery functions defined successfully")
 
@@ -526,6 +497,9 @@ def backup_tables_direct_copy(backup_path, tables_info):
 
                 table_info["backup_path"] = relpath
                 table_info["rows_written"] = get_rows_written(dest_table_path)
+                if table_info["rows_written"] is None and row_count is not None:
+                    # Delta didn't record operation metrics: count the copy so verification still runs
+                    table_info["rows_written"] = spark.read.format("delta").load(dest_table_path).count()
 
                 # Per-table metadata sidecar, next to the table copy
                 table_metadata = {
@@ -788,6 +762,7 @@ try:
     # Initialize results
     tables_info = []
     files_info = []
+    file_discovery_errors = []
     schema_enabled = None  # Unknown unless tables are backed up
 
     # Discover and analyze tables
@@ -833,7 +808,7 @@ try:
         log_message("🔍 FILES DISCOVERY PHASE", "INFO")
         log_message("=" * 50, "INFO")
 
-        files_info = discover_files(source_paths['files'])
+        files_info, file_discovery_errors = discover_files(source_paths['files'])
 
         if not files_info:
             log_message("⚠️  No files found in source lakehouse Files directory", "WARNING")
@@ -890,7 +865,7 @@ try:
     duration_seconds = (end_time - start_time).total_seconds()
 
     tables_failed = backup_result.get("tables_failed", 0)
-    files_failed = backup_result.get("files_failed", 0)
+    files_failed = backup_result.get("files_failed", 0) + len(file_discovery_errors)  # Unlistable folders count as failures
     status = "success" if not tables_failed and not files_failed and verification_result is not False else "partial"
     file_entries = [f for f in files_info if not f.get('is_directory', False)]
 
@@ -930,6 +905,7 @@ try:
             )}
             for table_info in tables_info
         ],
+        "file_discovery_errors": file_discovery_errors,
         "files_summary": {
             "total_files": len(file_entries),
             "total_size_mb": sum(f.get('size', 0) for f in file_entries) / 1024 / 1024
@@ -985,7 +961,8 @@ try:
         "backup_path": backup_path,
         "duration_seconds": duration_seconds,
         "verification_passed": verification_result,
-        **backup_result
+        **backup_result,
+        "files_failed": files_failed,
     }
 
     print("\n🎉 COMPLETE LAKEHOUSE BACKUP RESULT:")
@@ -993,7 +970,7 @@ try:
 
     if status != "success" and fail_on_partial_backup:
         raise RuntimeError(
-            f"Backup finished with problems: {tables_failed} tables failed, {files_failed} files failed, "
+            f"Backup finished with problems: {tables_failed} tables failed, {files_failed} files or folders failed, "
             f"verification passed: {verification_result}. The backup folder and manifest were written; "
             "see the log above. Set fail_on_partial_backup = False to accept partial backups."
         )

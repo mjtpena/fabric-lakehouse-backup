@@ -277,7 +277,7 @@ Non-schema sources keep the same `tables/<table>` layout as backups from the ori
 | `files_discovered`, `files_backed_up`, `files_failed` | File counts |
 | `start_time`, `end_time`, `duration_seconds` | Timing (UTC) |
 | `spark_version` | Spark version of the session that wrote the backup |
-| `manifest_json` | Everything above plus `tables`: per table `schema`, `table`, `status`, `backup_path`, `source_path`, `delta_version`, `row_count`, `rows_written`, `columns`, `partition_columns`, `verification` |
+| `manifest_json` | Everything above plus `tables`: per table `schema`, `table`, `status`, `backup_path`, `source_path`, `delta_version`, `row_count`, `rows_written`, `columns`, `partition_columns`, `verification`; and `file_discovery_errors`, the folders under `Files/` that couldn't be listed (each counts as a failed file) |
 
 Each table's `_metadata` sidecar holds the same per-table fields, so a single table can be inspected or restored by hand.
 

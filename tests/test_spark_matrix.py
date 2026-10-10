@@ -372,6 +372,43 @@ class SparkMatrixTests(unittest.TestCase):
         self.assert_restored(restore_run, target, {"Tables/good": f"{source}/Tables/good"})
         self.assertIn("This backup is partial", restore_run.output)
 
+    def test_unlistable_folder_makes_the_backup_partial(self):
+        import notebookutils
+
+        self.make_lakehouse("ws_src", "lh_locked", schema_enabled=False, tables={"t": (AUDIT, AUDIT_DDL, None)},
+                            files={"ok/a.txt": "a", "locked/b.txt": "b"})
+        local_fs = notebookutils.fs
+
+        class LockedFs(type(local_fs)):
+            def ls(self, path):
+                if path.rstrip("/").endswith("lh_locked.Lakehouse/Files/locked"):
+                    raise PermissionError("403 Forbidden")
+                return super().ls(path)
+
+        notebookutils.fs = LockedFs()
+        try:
+            run = self.run_backup("lh_locked", expect_ok=False)
+        finally:
+            notebookutils.fs = local_fs
+        self.assertIsInstance(run.error, RuntimeError)
+        self.assertIn("1 files or folders failed", str(run.error))
+        root = self.backup_root(run.namespace["backup_folder"])
+        manifest = json.loads(self.spark.read.format("delta").load(f"{root}/_manifest").collect()[0]["manifest_json"])
+        self.assertEqual((manifest["status"], manifest["files_backed_up"], manifest["files_failed"]), ("partial", 1, 1))
+        self.assertTrue(manifest["file_discovery_errors"][0]["path"].endswith("/Files/locked"))
+        self.assertEqual(manifest["tables_backed_up"], 1)
+
+    def test_verification_without_delta_operation_metrics(self):
+        self.make_lakehouse("ws_src", "lh_nometrics", schema_enabled=False, tables={"orders": (ORDERS, ORDERS_DDL, None)})
+        self.spark.conf.set("spark.databricks.delta.history.metricsEnabled", "false")
+        try:
+            folder = self.run_backup("lh_nometrics")
+        finally:
+            self.spark.conf.unset("spark.databricks.delta.history.metricsEnabled")
+        manifest = json.loads(self.spark.read.format("delta").load(f"{self.backup_root(folder)}/_manifest").collect()[0]["manifest_json"])
+        entry = manifest["tables"][0]
+        self.assertEqual((entry["row_count"], entry["rows_written"], entry["verification"]), (len(ORDERS), len(ORDERS), "rows_match"))
+
     def test_failed_backup_leaves_a_manifest_and_is_not_restored(self):
         def discover_files(files_path):
             raise OSError("simulated OneLake failure")
